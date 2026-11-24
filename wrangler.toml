@@ -1,3 +1,8 @@
 name = "gemini-4-hydrogen-chat"
 compatibility_date = "2026-01-01"
 pages_build_output_dir = "public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "xingmang-chat-db"
+database_id = "42481c59-c648-4a20-a86a-0a1801fa0e3a"
