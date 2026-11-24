@@ -897,7 +897,10 @@
     cards.forEach(function (card) {
       const match =
         card.dataset.provider === activeProvider &&
-        card.dataset.modelName === activeModel;
+        card.dataset.modelName === activeModel &&
+        (!card.dataset.baseUrl ||
+          admBaseUrl.value.trim().replace(/\/+$/, "") ===
+            card.dataset.baseUrl.replace(/\/+$/, ""));
       card.classList.toggle("active", match);
     });
     admCustomKeyGroup.classList.toggle("hidden", activeProvider !== "custom");
@@ -911,6 +914,7 @@
       btn.className = "preset-card";
       btn.dataset.provider = preset.provider;
       btn.dataset.modelName = preset.modelName;
+      btn.dataset.baseUrl = preset.baseUrl;
 
       const title = document.createElement("div");
       title.className = "preset-card-title";
@@ -927,6 +931,7 @@
         admProvider.value = preset.provider;
         admModel.value = preset.modelName;
         admBaseUrl.value = preset.baseUrl;
+        admEffort.value = preset.defaultEffort || "low";
         if (preset.provider === "deepseek") {
           admFallback.value = "";
         } else if (preset.modelName === "gemini-4-hydrogen" && !admFallback.value.trim()) {

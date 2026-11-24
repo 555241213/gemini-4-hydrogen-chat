@@ -4,6 +4,7 @@
 
 export const DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
 export const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/";
+export const DEFAULT_ALIYUN_MAAS_BASE_URL = "https://maas.qianwenaiapi.com/compatible-mode/v1/";
 
 export const DEFAULT_BASE_URL = DEFAULT_GEMINI_BASE_URL;
 export const DEFAULT_MODEL_NAME = "gemini-4-hydrogen";
@@ -25,12 +26,22 @@ export const MAX_USERS = 10;
 // 管理员后台内置模型预设（支持 DeepSeek V4.1 Flash 与 Gemini 4 全系快速切换）
 export const MODEL_PRESETS = [
   {
+    id: "aliyun-deepseek-v4.1-flash",
+    label: "阿里云 DeepSeek V4.1 Flash",
+    provider: "deepseek",
+    modelName: "deepseek-v4.1-flash",
+    baseUrl: DEFAULT_ALIYUN_MAAS_BASE_URL,
+    defaultEffort: "none",
+    desc: "阿里云千问平台 MaaS 兼容接口（可按控制台实际模型 ID 微调）",
+  },
+  {
     id: "deepseek-v4.1-flash",
-    label: "DeepSeek V4.1 Flash",
+    label: "DeepSeek 官方 V4.1 Flash",
     provider: "deepseek",
     modelName: "deepseek-flash",
     baseUrl: DEFAULT_DEEPSEEK_BASE_URL,
-    desc: "DeepSeek-V4.1-Flash（原生支持文字与图片识图，速度快、稳定）",
+    defaultEffort: "low",
+    desc: "DeepSeek 官方接口（api.deepseek.com，原生支持图文）",
   },
   {
     id: "gemini-4-hydrogen",
