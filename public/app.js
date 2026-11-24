@@ -74,7 +74,13 @@
   const adminCloseBtn = document.getElementById("admin-close-btn");
   const adminTabs = adminModal.querySelectorAll(".admin-tab");
   const adminTabModels = document.getElementById("admin-tab-models");
+  const adminTabPersona = document.getElementById("admin-tab-persona");
   const adminTabUsers = document.getElementById("admin-tab-users");
+  const admSystemPrompt = document.getElementById("adm-system-prompt");
+  const admPersonaMsg = document.getElementById("adm-persona-msg");
+  const admPersonaResetBtn = document.getElementById("adm-persona-reset-btn");
+  const admPersonaSaveBtn = document.getElementById("adm-persona-save-btn");
+  const personaChips = adminModal.querySelectorAll(".persona-chip");
   const presetGrid = document.getElementById("preset-grid");
   const admProvider = document.getElementById("adm-provider");
   const admModel = document.getElementById("adm-model");
@@ -972,6 +978,8 @@
       : "未单独配置";
     admCustomStatus.className = "key-badge" + (s.has_custom_key ? "" : " missing");
 
+    admSystemPrompt.value = s.system_prompt || s.default_system_prompt || "";
+
     renderAdminPresets();
   }
 
@@ -1038,6 +1046,7 @@
   async function openAdminModal() {
     if (!state.user || !state.user.is_admin || state.isStreaming) return;
     admModelMsg.classList.add("hidden");
+    admPersonaMsg.classList.add("hidden");
     admUserMsg.classList.add("hidden");
     adminModal.classList.remove("hidden");
 
@@ -1200,8 +1209,58 @@
         b.classList.toggle("active", b.dataset.tab === target);
       });
       adminTabModels.classList.toggle("hidden", target !== "models");
+      adminTabPersona.classList.toggle("hidden", target !== "persona");
       adminTabUsers.classList.toggle("hidden", target !== "users");
     });
+  });
+
+  const PERSONA_TEMPLATES = {
+    humor:
+      "你是一群好朋友群里的幽默搭子。说话接地气、机智风趣、偶尔温和地接梗吐槽，但关键时刻回答靠谱实用；不要官腔，用简洁自然的中文聊天。",
+    gentle:
+      "你是一位温柔、细腻、共情力很强的倾听者与生活伙伴。先接住用户的情绪再给出温暖实在的建议，语气松弛自然、不居高临下。",
+    concise:
+      "你是一位极简高效的日常百科助手。直接给核心结论与要点，不寒暄不铺垫，复杂问题分点说清。",
+  };
+
+  personaChips.forEach(function (chip) {
+    chip.addEventListener("click", function () {
+      const key = chip.dataset.persona;
+      if (key === "default") {
+        admSystemPrompt.value =
+          (state.adminSettings && state.adminSettings.default_system_prompt) || "";
+      } else if (PERSONA_TEMPLATES[key]) {
+        admSystemPrompt.value = PERSONA_TEMPLATES[key];
+      }
+      admSystemPrompt.focus();
+    });
+  });
+
+  admPersonaResetBtn.addEventListener("click", function () {
+    admSystemPrompt.value =
+      (state.adminSettings && state.adminSettings.default_system_prompt) || "";
+  });
+
+  admPersonaSaveBtn.addEventListener("click", async function () {
+    admPersonaSaveBtn.disabled = true;
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ system_prompt: admSystemPrompt.value.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showAdminMsg(admPersonaMsg, data.detail || "保存人设失败。", false);
+        return;
+      }
+      applySettingsToAdminForm(data.settings);
+      showAdminMsg(admPersonaMsg, "AI 人设已保存，全站下一条消息立即生效！", true);
+    } catch (_) {
+      showAdminMsg(admPersonaMsg, "保存失败，请检查网络。", false);
+    } finally {
+      admPersonaSaveBtn.disabled = false;
+    }
   });
 
   admProvider.addEventListener("change", function () {

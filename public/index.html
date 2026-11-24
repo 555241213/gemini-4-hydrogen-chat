@@ -190,8 +190,9 @@
         <button type="button" id="admin-close-btn" class="icon-btn" aria-label="关闭后台">×</button>
       </div>
 
-      <div class="admin-tabs">
+      <div class="admin-tabs admin-tabs-3">
         <button type="button" class="admin-tab active" data-tab="models">模型与密钥</button>
+        <button type="button" class="admin-tab" data-tab="persona">AI 人设</button>
         <button type="button" class="admin-tab" data-tab="users">成员密码管理</button>
       </div>
 
@@ -258,7 +259,35 @@
         </div>
       </div>
 
-      <!-- Tab 2: 成员密码管理 -->
+      <!-- Tab 2: AI 人设 -->
+      <div id="admin-tab-persona" class="admin-panel hidden">
+        <div class="admin-section-label">
+          设定全局 AI 人设（保存后全站立即生效，不会写入历史对话，最多 4,000 字）
+        </div>
+        <div class="persona-chips">
+          <button type="button" class="glass-action-btn persona-chip" data-persona="default">默认日常助手</button>
+          <button type="button" class="glass-action-btn persona-chip" data-persona="humor">幽默损友搭子</button>
+          <button type="button" class="glass-action-btn persona-chip" data-persona="gentle">温柔倾听治愈</button>
+          <button type="button" class="glass-action-btn persona-chip" data-persona="concise">极简百科直答</button>
+        </div>
+        <div class="field-group">
+          <label for="adm-system-prompt">人设提示词（System Prompt）</label>
+          <textarea
+            id="adm-system-prompt"
+            class="glass-textarea"
+            rows="7"
+            maxlength="4000"
+            placeholder="例如：你是一只说话带点傲娇但非常靠谱的电子小猫..."
+          ></textarea>
+        </div>
+        <div id="adm-persona-msg" class="admin-msg hidden"></div>
+        <div class="admin-footer">
+          <button type="button" id="adm-persona-reset-btn" class="glass-action-btn admin-btn-lg">恢复默认人设</button>
+          <button type="button" id="adm-persona-save-btn" class="primary-btn admin-save-btn">保存人设并生效</button>
+        </div>
+      </div>
+
+      <!-- Tab 3: 成员密码管理 -->
       <div id="admin-tab-users" class="admin-panel hidden">
         <div class="admin-section-label">当前成员列表（最多 10 人，各自记录严格隔离）</div>
         <div id="adm-users-list" class="adm-users-list"></div>

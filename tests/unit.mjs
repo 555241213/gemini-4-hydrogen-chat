@@ -289,24 +289,27 @@ test("admin switching between DeepSeek V4.1 Flash and Gemini 4 persists in D1", 
   assert.equal(initial.modelName, "gemini-4-hydrogen");
   assert.equal(initial.activeApiKey, "g_key");
 
-  // 切换到 DeepSeek V4.1 Flash
+  // 切换到 DeepSeek V4.1 Flash 并设定自定义 AI 人设
   await setAppSetting(db, "active_provider", "deepseek");
   await setAppSetting(db, "active_model", "deepseek-flash");
   await setAppSetting(db, "active_base_url", "https://api.deepseek.com/");
   await setAppSetting(db, "fallback_model", "");
+  await setAppSetting(db, "system_prompt", "你是一只傲娇但很靠谱的电子小猫。");
 
   const dsRuntime = await resolveRuntimeSettings(db, config);
   assert.equal(dsRuntime.provider, "deepseek");
   assert.equal(dsRuntime.modelName, "deepseek-flash");
   assert.equal(dsRuntime.baseUrl, "https://api.deepseek.com/");
   assert.equal(dsRuntime.activeApiKey, "ds_key");
+  assert.equal(dsRuntime.systemPrompt, "你是一只傲娇但很靠谱的电子小猫。");
 
-  // 流式请求命中 DeepSeek 端点与模型
+  // 流式请求命中 DeepSeek 端点、模型与自定义人设
   const conv = await createConversation(db, "admin", "测试");
   await insertMessage(db, { userId: "admin", conversationId: conv.id, role: "user", content: "hi" });
 
   let requestedUrl = "";
   let requestedModel = "";
+  let requestedSystem = "";
   const encoder = new TextEncoder();
   const res = createChatSseResponse({
     db,
@@ -315,7 +318,9 @@ test("admin switching between DeepSeek V4.1 Flash and Gemini 4 persists in D1", 
     conversationId: conv.id,
     fetchImpl: async (url, init) => {
       requestedUrl = url;
-      requestedModel = JSON.parse(init.body).model;
+      const body = JSON.parse(init.body);
+      requestedModel = body.model;
+      requestedSystem = body.messages[0]?.content || "";
       return new Response(
         new ReadableStream({
           start(c) {
@@ -331,6 +336,7 @@ test("admin switching between DeepSeek V4.1 Flash and Gemini 4 persists in D1", 
   const sseText = await res.text();
   assert.equal(requestedUrl, "https://api.deepseek.com/chat/completions");
   assert.equal(requestedModel, "deepseek-flash");
+  assert.equal(requestedSystem, "你是一只傲娇但很靠谱的电子小猫。");
   assert.match(sseText, /DeepSeek回复/);
 });
 

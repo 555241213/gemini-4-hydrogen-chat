@@ -141,7 +141,11 @@ export function createChatSseResponse({
           conversationId,
           DEFAULT_CONTEXT_TURNS * 2,
         );
-        const apiMessages = buildApiMessages(recentRows);
+        const apiMessages = buildApiMessages(
+          recentRows,
+          DEFAULT_CONTEXT_TURNS,
+          runtime.systemPrompt,
+        );
 
         const requestUpstream = async (targetModel, targetBaseUrl, targetApiKey) => {
           const requestBody = {

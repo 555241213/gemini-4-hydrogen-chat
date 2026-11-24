@@ -1386,3 +1386,34 @@ html[data-theme="light"] .admin-msg.ok {
     grid-column: span 1;
   }
 }
+
+.admin-tabs-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.persona-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.glass-textarea {
+  width: 100%;
+  min-height: 140px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.glass-textarea:focus {
+  border-color: var(--glass-border-focus);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}

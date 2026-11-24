@@ -6,7 +6,7 @@
  * - managed_users：管理员在线增删/改密的成员列表（与环境变量 USER_PASSWORDS 合并）
  */
 
-import { DEFAULT_FALLBACK_MODEL, normalizeBaseUrl } from "./config.js";
+import { DEFAULT_FALLBACK_MODEL, DEFAULT_SYSTEM_PROMPT, normalizeBaseUrl } from "./config.js";
 
 let schemaInitPromise = null;
 
@@ -376,6 +376,8 @@ export async function resolveRuntimeSettings(db, config) {
   }
   if (fallbackModel === modelName) fallbackModel = "";
 
+  const systemPrompt = String(stored.system_prompt || "").trim() || DEFAULT_SYSTEM_PROMPT;
+
   return {
     provider,
     modelName,
@@ -388,6 +390,7 @@ export async function resolveRuntimeSettings(db, config) {
     hasEnvDeepseekKey: Boolean(config.deepseekApiKey),
     reasoningEffort,
     fallbackModel,
+    systemPrompt,
   };
 }
 
