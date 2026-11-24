@@ -26,6 +26,15 @@ export const MAX_USERS = 10;
 // 管理员后台内置模型预设（支持 DeepSeek V4.1 Flash 与 Gemini 4 全系快速切换）
 export const MODEL_PRESETS = [
   {
+    id: "gemini-4-hydrogen-us-relay",
+    label: "Gemini 4 Hydrogen（美东转发）",
+    provider: "gemini",
+    modelName: "gemini-4-hydrogen",
+    baseUrl: "https://gemini-us-relay-six.vercel.app/v1beta/openai/",
+    defaultEffort: "low",
+    desc: "经 Vercel 美东（iad1）转发 Google 官方，国内免代理不撞香港限制",
+  },
+  {
     id: "aliyun-deepseek-v4.1-flash",
     label: "阿里云 DeepSeek V4.1 Flash",
     provider: "deepseek",
