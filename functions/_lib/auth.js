@@ -1,8 +1,9 @@
 /**
- * 一人一密认证与无状态 HMAC-SHA256 会话 Cookie 校验（基于 Web Crypto API）
+ * 一人一密认证、管理员识别与无状态 HMAC-SHA256 会话 Cookie 校验
  */
 
-import { SESSION_TTL_SECONDS } from "./config.js";
+import { MAX_USERS, SESSION_TTL_SECONDS, isAdminUsername } from "./config.js";
+import { listManagedUsers } from "./db.js";
 
 export const SESSION_COOKIE_NAME = "xingmang_session";
 
@@ -49,15 +50,40 @@ function constantTimeEqualBytes(a, b) {
 }
 
 /**
- * 若未显式配置 SESSION_SECRET，则基于后端密钥派生稳定的签名密钥，减少配置步骤。
+ * 合并环境变量成员与 D1 在线管理成员（D1 同名条目可覆盖密码，管理员权限并集保持安全）。
  */
-export async function resolveSessionSecret(config) {
-  if (config.sessionSecret) return config.sessionSecret;
-  return sha256Hex(`xingmang-session::${config.apiKey}::${config.rawUserPasswords}`);
+export async function getAllUserEntries(config, db) {
+  const byId = new Map();
+  for (const entry of config.userEntries) {
+    byId.set(entry.userId, { ...entry });
+  }
+  if (db) {
+    const dbUsers = await listManagedUsers(db);
+    for (const u of dbUsers) {
+      const existing = byId.get(u.userId);
+      byId.set(u.userId, {
+        userId: u.userId,
+        password: u.password,
+        isAdmin: Boolean(u.isAdmin || existing?.isAdmin || isAdminUsername(u.userId)),
+        source: existing ? "env+db" : "db",
+      });
+    }
+  }
+  return Array.from(byId.values()).slice(0, MAX_USERS + 1);
 }
 
 /**
- * 常量时间遍历所有成员密码，避免通过响应耗时推测成员数量或密码前缀。
+ * 若未显式配置 SESSION_SECRET，则基于后端稳定环境变量派生签名密钥。
+ */
+export async function resolveSessionSecret(config) {
+  if (config.sessionSecret) return config.sessionSecret;
+  return sha256Hex(
+    `xingmang-session::${config.geminiApiKey}::${config.deepseekApiKey}::${config.adminPassword}::${config.rawUserPasswords}`,
+  );
+}
+
+/**
+ * 常量时间遍历所有成员密码进行认证。
  */
 export async function authenticatePassword(candidate, userEntries) {
   if (!candidate || !userEntries.length) return null;
@@ -96,7 +122,7 @@ export async function createSessionToken(userId, password, secret, ttlSeconds = 
   return `${payloadB64}.${toBase64Url(sig)}`;
 }
 
-export async function verifySessionToken(token, config) {
+export async function verifySessionToken(token, config, db = null) {
   if (!token || typeof token !== "string" || !token.includes(".")) return null;
   const dotIdx = token.indexOf(".");
   const payloadB64 = token.slice(0, dotIdx);
@@ -119,14 +145,17 @@ export async function verifySessionToken(token, config) {
     if (!payload || !payload.uid || !payload.exp) return null;
     if (payload.exp < Math.floor(Date.now() / 1000)) return null;
 
-    const entry = config.userEntries.find((u) => u.userId === payload.uid);
+    const allEntries = await getAllUserEntries(config, db);
+    const entry = allEntries.find((u) => u.userId === payload.uid);
     if (!entry) return null;
 
-    // 校验密码版本标签：管理员修改该成员密码后，旧 Cookie 自动失效
     const currentPv = (await sha256Hex(entry.password)).slice(0, 12);
     if (payload.pv !== currentPv) return null;
 
-    return { userId: entry.userId };
+    return {
+      userId: entry.userId,
+      isAdmin: Boolean(entry.isAdmin),
+    };
   } catch {
     return null;
   }
@@ -164,9 +193,16 @@ export function buildLogoutCookieHeader(request) {
   return buildSessionCookieHeader("", request, 0);
 }
 
-export async function requireAuthenticatedUser(request, config) {
+export async function requireAuthenticatedUser(request, config, db = null) {
   const token = parseCookie(request.headers.get("Cookie"), SESSION_COOKIE_NAME);
-  return verifySessionToken(token, config);
+  return verifySessionToken(token, config, db);
+}
+
+export async function requireAdminUser(request, config, db = null) {
+  const user = await requireAuthenticatedUser(request, config, db);
+  if (!user) return { user: null, status: 401, detail: "未登录或登录已过期。" };
+  if (!user.isAdmin) return { user: null, status: 403, detail: "仅管理员账户可访问后台设置。" };
+  return { user, status: 200, detail: null };
 }
 
 export function jsonResponse(data, status = 200, extraHeaders = {}) {

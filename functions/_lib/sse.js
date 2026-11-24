@@ -1,5 +1,5 @@
 /**
- * Gemini OpenAI 兼容接口流式代理、滑动窗口与单轮传图构造
+ * 多模型（DeepSeek V4.1 Flash / Gemini 4 / 自定义 OpenAI 兼容端点）流式代理与 503 容灾
  */
 
 import {
@@ -8,12 +8,12 @@ import {
   DEFAULT_SYSTEM_PROMPT,
   MAX_OUTPUT_TOKENS,
 } from "./config.js";
-import { getRecentMessages, insertMessage } from "./db.js";
+import { getRecentMessages, insertMessage, resolveRuntimeSettings } from "./db.js";
 
 /**
- * 构造发送给 Gemini OpenAI 兼容端点的 messages 列表：
+ * 构造发送给 OpenAI 兼容端点的 messages 列表：
  * - 动态附加系统提示词
- * - 仅截取最近 N 轮（确保窗口起点为 user）
+ * - 仅截取当前对话最近 N 轮（确保窗口起点为 user）
  * - 单轮传图策略：仅当前最新一轮 user 消息携带图片，历史轮次仅保留文本
  */
 export function buildApiMessages(
@@ -79,7 +79,7 @@ export function formatUpstreamError(status, rawDetail = "") {
   const detail = extractSafeUpstreamDetail(rawDetail);
   const suffix = detail ? `（HTTP ${status}：${detail}）` : `（HTTP ${status}）`;
 
-  if (status === 401) return `❌ 服务密钥无效或已过期${suffix}，请联系管理员检查 GEMINI_API_KEY。`;
+  if (status === 401) return `❌ 当前模型 API 密钥无效或已过期${suffix}，请联系管理员检查后台密钥配置。`;
   if (status === 403) return `❌ 当前密钥无权访问或节点地区受限${suffix}，请联系管理员核查。`;
   if (status === 404) return `❌ 服务模型或接口地址配置异常${suffix}，请联系管理员检查。`;
   if (status === 429) return `⏳ 当前请求太快或配额已达上限${suffix}，请稍等几秒再试。`;
@@ -105,7 +105,9 @@ export function createChatSseResponse({
   db,
   config,
   userId,
+  conversationId,
   preSavedUserMsg = null,
+  updatedConversation = null,
   fetchImpl = fetch,
 }) {
   const encoder = new TextEncoder();
@@ -117,49 +119,78 @@ export function createChatSseResponse({
       };
 
       try {
+        if (updatedConversation) {
+          sendEvent("conversation_updated", { conversation: updatedConversation });
+        }
         if (preSavedUserMsg) {
           sendEvent("user_saved", { message: preSavedUserMsg });
         }
 
-        const recentRows = await getRecentMessages(db, userId, DEFAULT_CONTEXT_TURNS * 2);
+        const runtime = await resolveRuntimeSettings(db, config);
+        if (!runtime.activeApiKey) {
+          sendEvent("error", {
+            error: `❌ 当前模型（${runtime.modelName}）尚未配置对应的 API Key，请管理员进入后台填入密钥。`,
+          });
+          controller.close();
+          return;
+        }
+
+        const recentRows = await getRecentMessages(
+          db,
+          userId,
+          conversationId,
+          DEFAULT_CONTEXT_TURNS * 2,
+        );
         const apiMessages = buildApiMessages(recentRows);
 
-        const requestUpstream = async (targetModel) => {
+        const requestUpstream = async (targetModel, targetBaseUrl, targetApiKey) => {
           const requestBody = {
             model: targetModel,
             messages: apiMessages,
             max_tokens: MAX_OUTPUT_TOKENS,
             stream: true,
           };
-          if (config.reasoningEffort !== null) {
-            requestBody.reasoning_effort = config.reasoningEffort;
+          if (runtime.reasoningEffort !== null) {
+            requestBody.reasoning_effort = runtime.reasoningEffort;
           }
 
-          return fetchImpl(`${config.baseUrl}chat/completions`, {
+          return fetchImpl(`${targetBaseUrl}chat/completions`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${config.apiKey}`,
+              Authorization: `Bearer ${targetApiKey}`,
             },
             body: JSON.stringify(requestBody),
             signal: AbortSignal.timeout(API_TIMEOUT_MS),
           });
         };
 
-        let upstreamRes = await requestUpstream(config.modelName);
+        let upstreamRes = await requestUpstream(
+          runtime.modelName,
+          runtime.baseUrl,
+          runtime.activeApiKey,
+        );
 
-        // 仅在 503（未计费且明确为临时高峰拥堵）时短等重试一次；若仍 503 则无缝切换备选模型
+        // 仅在 503（未计费且为临时高峰拥堵）时短暂等待后重试一次；若仍 503 且有同厂商备选模型则自动切换
         if (upstreamRes.status === 503) {
           await new Promise((resolve) => setTimeout(resolve, 800));
-          upstreamRes = await requestUpstream(config.modelName);
-          if (upstreamRes.status === 503 && config.fallbackModel) {
-            upstreamRes = await requestUpstream(config.fallbackModel);
+          upstreamRes = await requestUpstream(
+            runtime.modelName,
+            runtime.baseUrl,
+            runtime.activeApiKey,
+          );
+          if (upstreamRes.status === 503 && runtime.fallbackModel) {
+            upstreamRes = await requestUpstream(
+              runtime.fallbackModel,
+              runtime.baseUrl,
+              runtime.activeApiKey,
+            );
           }
         }
 
         if (!upstreamRes.ok || !upstreamRes.body) {
           const rawErr = await upstreamRes.text().catch(() => "");
-          console.error("Gemini upstream error", upstreamRes.status, rawErr.slice(0, 300));
+          console.error("Model upstream error", upstreamRes.status, rawErr.slice(0, 300));
           sendEvent("error", { error: formatUpstreamError(upstreamRes.status, rawErr) });
           controller.close();
           return;
@@ -210,9 +241,9 @@ export function createChatSseResponse({
           return;
         }
 
-        // 仅在完整生成后才将助手回复写入 D1，杜绝残缺消息污染历史
         const savedAssistant = await insertMessage(db, {
           userId,
+          conversationId,
           role: "assistant",
           content: fullReply,
           imageData: null,

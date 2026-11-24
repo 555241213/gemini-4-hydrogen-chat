@@ -1,5 +1,5 @@
 /**
- * 星芒 AI · 前端状态管理、浏览器端图片压缩、SSE 流式渲染与交互逻辑
+ * 星芒 AI · 前端状态管理、多对话切换、管理员后台、图片压缩与 SSE 流式渲染
  */
 (function () {
   "use strict";
@@ -14,12 +14,16 @@
     user: null,
     configured: true,
     missingConfig: [],
+    conversations: [],
+    currentConversationId: null,
     messages: [],
     isStreaming: false,
     selectedFile: null,
     selectedPreviewUrl: null,
     userScrolledUp: false,
     lastError: null,
+    adminPresets: [],
+    adminSettings: null,
   };
 
   // DOM 引用
@@ -31,10 +35,13 @@
   const authError = document.getElementById("auth-error");
   const authSubmitBtn = document.getElementById("auth-submit-btn");
 
+  const historyDrawerBtn = document.getElementById("history-drawer-btn");
   const navUserPill = document.getElementById("nav-user-pill");
+  const newChatBtn = document.getElementById("new-chat-btn");
   const themeToggleBtn = document.getElementById("theme-toggle-btn");
   const themeIcon = document.getElementById("theme-icon");
   const clearBtn = document.getElementById("clear-btn");
+  const adminBtn = document.getElementById("admin-btn");
   const logoutBtn = document.getElementById("logout-btn");
 
   const chatScrollArea = document.getElementById("chat-scroll-area");
@@ -56,6 +63,41 @@
   const imagePreviewName = document.getElementById("image-preview-name");
   const imageRemoveBtn = document.getElementById("image-remove-btn");
 
+  // 历史对话抽屉
+  const drawerBackdrop = document.getElementById("drawer-backdrop");
+  const drawerCloseBtn = document.getElementById("drawer-close-btn");
+  const drawerNewChatBtn = document.getElementById("drawer-new-chat-btn");
+  const conversationsList = document.getElementById("conversations-list");
+
+  // 管理员后台弹窗
+  const adminModal = document.getElementById("admin-modal");
+  const adminCloseBtn = document.getElementById("admin-close-btn");
+  const adminTabs = adminModal.querySelectorAll(".admin-tab");
+  const adminTabModels = document.getElementById("admin-tab-models");
+  const adminTabUsers = document.getElementById("admin-tab-users");
+  const presetGrid = document.getElementById("preset-grid");
+  const admProvider = document.getElementById("adm-provider");
+  const admModel = document.getElementById("adm-model");
+  const admBaseUrl = document.getElementById("adm-base-url");
+  const admEffort = document.getElementById("adm-effort");
+  const admFallback = document.getElementById("adm-fallback");
+  const admDeepseekKey = document.getElementById("adm-deepseek-key");
+  const admGeminiKey = document.getElementById("adm-gemini-key");
+  const admCustomKey = document.getElementById("adm-custom-key");
+  const admCustomKeyGroup = document.getElementById("adm-custom-key-group");
+  const admDeepseekStatus = document.getElementById("adm-deepseek-status");
+  const admGeminiStatus = document.getElementById("adm-gemini-status");
+  const admCustomStatus = document.getElementById("adm-custom-status");
+  const admModelMsg = document.getElementById("adm-model-msg");
+  const admTestBtn = document.getElementById("adm-test-btn");
+  const admSaveBtn = document.getElementById("adm-save-btn");
+  const admUsersList = document.getElementById("adm-users-list");
+  const admAddUserForm = document.getElementById("adm-add-user-form");
+  const admNewUid = document.getElementById("adm-new-uid");
+  const admNewPwd = document.getElementById("adm-new-pwd");
+  const admUserMsg = document.getElementById("adm-user-msg");
+
+  // 确认与图片放大弹窗
   const confirmModal = document.getElementById("confirm-modal");
   const confirmCancelBtn = document.getElementById("confirm-cancel-btn");
   const confirmOkBtn = document.getElementById("confirm-ok-btn");
@@ -115,16 +157,18 @@
   }
 
   // --------------------------------------------------------------------------
-  // 视图切换与错误展示
+  // 视图切换与控件状态
   // --------------------------------------------------------------------------
 
   function showAuthView() {
     authView.classList.remove("hidden");
     appView.classList.add("hidden");
+    drawerBackdrop.classList.add("hidden");
+    adminModal.classList.add("hidden");
     if (!state.configured) {
       const missingText = state.missingConfig.length
         ? state.missingConfig.join("、")
-        : "GEMINI_API_KEY、USER_PASSWORDS、D1 数据库绑定（DB）";
+        : "GEMINI_API_KEY / DEEPSEEK_API_KEY、USER_PASSWORDS、D1 数据库绑定（DB）";
       configWarning.textContent =
         "服务尚未完成初始化配置，缺少：" +
         missingText +
@@ -140,6 +184,7 @@
     authView.classList.add("hidden");
     appView.classList.remove("hidden");
     navUserPill.textContent = state.user ? state.user.display_name || state.user.username : "";
+    adminBtn.classList.toggle("hidden", !(state.user && state.user.is_admin));
     renderMessages();
     updateControlsDisabled();
     scrollToBottom(false);
@@ -147,8 +192,12 @@
 
   function updateControlsDisabled() {
     const busy = state.isStreaming;
+    historyDrawerBtn.disabled = busy;
+    newChatBtn.disabled = busy;
+    drawerNewChatBtn.disabled = busy;
     themeToggleBtn.disabled = busy;
     clearBtn.disabled = busy || state.messages.length === 0;
+    adminBtn.disabled = busy;
     logoutBtn.disabled = busy;
     attachBtn.disabled = busy;
     promptInput.disabled = busy;
@@ -193,6 +242,149 @@
     });
     state.userScrolledUp = false;
     scrollBottomBtn.classList.remove("visible");
+  }
+
+  // --------------------------------------------------------------------------
+  // 多对话管理（新建对话 / 切换 / 删除）
+  // --------------------------------------------------------------------------
+
+  function renderConversationsDrawer() {
+    conversationsList.innerHTML = "";
+    if (!state.conversations.length) {
+      const empty = document.createElement("div");
+      empty.className = "conv-empty";
+      empty.textContent = "还没有历史对话，直接发送消息或点上方新建吧";
+      conversationsList.appendChild(empty);
+      return;
+    }
+
+    state.conversations.forEach(function (conv) {
+      const row = document.createElement("div");
+      row.className =
+        "conv-item" + (conv.id === state.currentConversationId ? " active" : "");
+
+      const title = document.createElement("span");
+      title.className = "conv-item-title";
+      title.textContent = conv.title || "新对话";
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "conv-item-del";
+      delBtn.title = "删除该对话";
+      delBtn.textContent = "×";
+      delBtn.addEventListener("click", async function (evt) {
+        evt.stopPropagation();
+        await deleteConversationById(conv.id);
+      });
+
+      row.addEventListener("click", async function () {
+        drawerBackdrop.classList.add("hidden");
+        if (conv.id !== state.currentConversationId) {
+          await switchConversation(conv.id);
+        }
+      });
+
+      row.appendChild(title);
+      row.appendChild(delBtn);
+      conversationsList.appendChild(row);
+    });
+  }
+
+  async function refreshConversations() {
+    const res = await fetch("/api/conversations");
+    if (res.status === 401) {
+      state.user = null;
+      showAuthView();
+      return false;
+    }
+    const data = await res.json();
+    state.conversations = data.conversations || [];
+    renderConversationsDrawer();
+    return true;
+  }
+
+  async function switchConversation(conversationId) {
+    if (!conversationId) {
+      state.currentConversationId = null;
+      state.messages = [];
+      setChatError(null);
+      renderMessages();
+      renderConversationsDrawer();
+      return;
+    }
+
+    const res = await fetch(
+      "/api/messages?conversation_id=" + encodeURIComponent(conversationId),
+    );
+    if (res.status === 401) {
+      state.user = null;
+      showAuthView();
+      return;
+    }
+    if (!res.ok) return;
+    const data = await res.json();
+    state.currentConversationId = data.conversation_id;
+    state.messages = data.messages || [];
+    setChatError(null);
+    renderMessages();
+    renderConversationsDrawer();
+    scrollToBottom(false);
+  }
+
+  async function handleNewChat() {
+    if (state.isStreaming) return;
+    drawerBackdrop.classList.add("hidden");
+    // 如果当前本来就是空的新对话，只聚焦输入框即可，不产生无意义的空记录
+    if (state.messages.length === 0) {
+      state.currentConversationId = null;
+      setChatError(null);
+      renderConversationsDrawer();
+      promptInput.focus();
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "新对话" }),
+      });
+      if (res.status === 401) {
+        state.user = null;
+        showAuthView();
+        return;
+      }
+      const data = await res.json();
+      if (data.conversation) {
+        state.conversations.unshift(data.conversation);
+        state.currentConversationId = data.conversation.id;
+        state.messages = [];
+        setChatError(null);
+        renderMessages();
+        renderConversationsDrawer();
+        promptInput.focus();
+      }
+    } catch (_) {}
+  }
+
+  async function deleteConversationById(conversationId) {
+    if (state.isStreaming) return;
+    try {
+      const res = await fetch(
+        "/api/conversations?id=" + encodeURIComponent(conversationId),
+        { method: "DELETE" },
+      );
+      if (!res.ok) return;
+      state.conversations = state.conversations.filter(function (c) {
+        return c.id !== conversationId;
+      });
+      if (state.currentConversationId === conversationId) {
+        const next = state.conversations[0] || null;
+        await switchConversation(next ? next.id : null);
+      } else {
+        renderConversationsDrawer();
+      }
+    } catch (_) {}
   }
 
   // --------------------------------------------------------------------------
@@ -315,10 +507,6 @@
     updateScrollBottomState();
   }
 
-  // --------------------------------------------------------------------------
-  // 代码块一键复制事件委托
-  // --------------------------------------------------------------------------
-
   messagesList.addEventListener("click", async function (evt) {
     const copyBtn = evt.target.closest(".glass-code-copy-btn");
     if (!copyBtn) return;
@@ -392,7 +580,6 @@
         if (!ctx) {
           throw new Error("当前浏览器不支持图片压缩处理。");
         }
-        // PNG/WebP 透明区域合成白底
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, targetW, targetH);
         source.draw(ctx, targetW, targetH);
@@ -463,7 +650,9 @@
           continue;
         }
 
-        if (eventName === "user_saved" && handlers.onUserSaved) {
+        if (eventName === "conversation_updated" && handlers.onConversationUpdated) {
+          handlers.onConversationUpdated(payload.conversation);
+        } else if (eventName === "user_saved" && handlers.onUserSaved) {
           handlers.onUserSaved(payload.message);
         } else if (eventName === "delta" && handlers.onDelta) {
           handlers.onDelta(payload.text || "");
@@ -526,6 +715,19 @@
       }
 
       await consumeSseStream(response, {
+        onConversationUpdated: function (conv) {
+          if (!conv) return;
+          state.currentConversationId = conv.id;
+          const idx = state.conversations.findIndex(function (c) {
+            return c.id === conv.id;
+          });
+          if (idx >= 0) {
+            state.conversations[idx] = conv;
+          } else {
+            state.conversations.unshift(conv);
+          }
+          renderConversationsDrawer();
+        },
         onUserSaved: function (userMsg) {
           state.messages.push(userMsg);
           const userEl = createUserMessageElement(userMsg);
@@ -568,7 +770,7 @@
   }
 
   // --------------------------------------------------------------------------
-  // 图片附件与输入框交互
+  // 图片附件与发送交互
   // --------------------------------------------------------------------------
 
   function clearSelectedImage() {
@@ -644,42 +846,238 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          conversation_id: state.currentConversationId,
           content: text,
           image_data_url: imageDataUrl,
         }),
-      })
+      }),
     );
   }
 
   async function handleRetry() {
-    if (state.isStreaming) return;
-    await runStreamRequest(fetch("/api/chat/retry", { method: "POST" }));
+    if (state.isStreaming || !state.currentConversationId) return;
+    await runStreamRequest(
+      fetch("/api/chat/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: state.currentConversationId }),
+      }),
+    );
   }
 
   async function handleRegenerate() {
-    if (state.isStreaming) return;
+    if (state.isStreaming || !state.currentConversationId) return;
     if (!state.messages.length || state.messages[state.messages.length - 1].role !== "assistant") {
       return;
     }
     state.messages.pop();
     renderMessages();
-    await runStreamRequest(fetch("/api/chat/regenerate", { method: "POST" }));
+    await runStreamRequest(
+      fetch("/api/chat/regenerate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: state.currentConversationId }),
+      }),
+    );
   }
 
   // --------------------------------------------------------------------------
-  // 认证与初始化流程
+  // 管理员后台逻辑（切换模型 / 测试连通性 / 管理成员）
   // --------------------------------------------------------------------------
 
-  async function loadMessages() {
-    const res = await fetch("/api/messages");
-    if (res.status === 401) {
-      state.user = null;
-      showAuthView();
-      return;
-    }
+  function showAdminMsg(el, text, isOk) {
+    el.textContent = text;
+    el.className = "admin-msg " + (isOk ? "ok" : "err");
+  }
+
+  function highlightMatchingPreset() {
+    const activeProvider = admProvider.value;
+    const activeModel = admModel.value.trim();
+    const cards = presetGrid.querySelectorAll(".preset-card");
+    cards.forEach(function (card) {
+      const match =
+        card.dataset.provider === activeProvider &&
+        card.dataset.modelName === activeModel;
+      card.classList.toggle("active", match);
+    });
+    admCustomKeyGroup.classList.toggle("hidden", activeProvider !== "custom");
+  }
+
+  function renderAdminPresets() {
+    presetGrid.innerHTML = "";
+    state.adminPresets.forEach(function (preset) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "preset-card";
+      btn.dataset.provider = preset.provider;
+      btn.dataset.modelName = preset.modelName;
+
+      const title = document.createElement("div");
+      title.className = "preset-card-title";
+      title.textContent = preset.label;
+
+      const desc = document.createElement("div");
+      desc.className = "preset-card-desc";
+      desc.textContent = preset.desc;
+
+      btn.appendChild(title);
+      btn.appendChild(desc);
+
+      btn.addEventListener("click", function () {
+        admProvider.value = preset.provider;
+        admModel.value = preset.modelName;
+        admBaseUrl.value = preset.baseUrl;
+        if (preset.provider === "deepseek") {
+          admFallback.value = "";
+        } else if (preset.modelName === "gemini-4-hydrogen" && !admFallback.value.trim()) {
+          admFallback.value = "gemini-3.8-flash";
+        }
+        highlightMatchingPreset();
+      });
+
+      presetGrid.appendChild(btn);
+    });
+    highlightMatchingPreset();
+  }
+
+  function applySettingsToAdminForm(s) {
+    state.adminSettings = s;
+    admProvider.value = s.provider || "gemini";
+    admModel.value = s.model_name || "";
+    admBaseUrl.value = s.base_url || "";
+    admEffort.value = s.reasoning_effort || "low";
+    admFallback.value = s.fallback_model || "";
+
+    admDeepseekKey.value = "";
+    admGeminiKey.value = "";
+    admCustomKey.value = "";
+
+    admDeepseekStatus.textContent = s.has_deepseek_key
+      ? "已配置（" + s.deepseek_key_masked + "）"
+      : "未配置";
+    admDeepseekStatus.className = "key-badge" + (s.has_deepseek_key ? "" : " missing");
+
+    admGeminiStatus.textContent = s.has_gemini_key
+      ? "已配置（" + s.gemini_key_masked + "）"
+      : "未配置";
+    admGeminiStatus.className = "key-badge" + (s.has_gemini_key ? "" : " missing");
+
+    admCustomStatus.textContent = s.has_custom_key
+      ? "已配置（" + s.custom_key_masked + "）"
+      : "未单独配置";
+    admCustomStatus.className = "key-badge" + (s.has_custom_key ? "" : " missing");
+
+    renderAdminPresets();
+  }
+
+  async function loadAdminUsers() {
+    const res = await fetch("/api/admin/users");
+    if (!res.ok) return;
     const data = await res.json();
-    state.messages = data.messages || [];
-    state.lastError = null;
+    admUsersList.innerHTML = "";
+
+    (data.users || []).forEach(function (u) {
+      const row = document.createElement("div");
+      row.className = "adm-user-row";
+
+      const meta = document.createElement("div");
+      meta.className = "adm-user-meta";
+
+      const name = document.createElement("span");
+      name.className = "adm-user-name";
+      name.textContent = u.user_id;
+      meta.appendChild(name);
+
+      if (u.is_admin) {
+        const tag = document.createElement("span");
+        tag.className = "adm-tag admin";
+        tag.textContent = "管理员";
+        meta.appendChild(tag);
+      }
+
+      const srcTag = document.createElement("span");
+      srcTag.className = "adm-tag";
+      srcTag.textContent =
+        u.source === "db" ? "后台添加" : u.source === "env+db" ? "密钥+后台覆盖" : "环境变量";
+      meta.appendChild(srcTag);
+
+      const countTag = document.createElement("span");
+      countTag.className = "adm-tag";
+      countTag.textContent = u.message_count + " 条消息";
+      meta.appendChild(countTag);
+
+      row.appendChild(meta);
+
+      if (u.source === "db" && (!state.user || u.user_id !== state.user.username)) {
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "glass-action-btn";
+        delBtn.textContent = "删除";
+        delBtn.addEventListener("click", async function () {
+          const delRes = await fetch(
+            "/api/admin/users?user_id=" + encodeURIComponent(u.user_id),
+            { method: "DELETE" },
+          );
+          if (delRes.ok) {
+            showAdminMsg(admUserMsg, "已移除成员 " + u.user_id, true);
+            await loadAdminUsers();
+          }
+        });
+        row.appendChild(delBtn);
+      }
+
+      admUsersList.appendChild(row);
+    });
+  }
+
+  async function openAdminModal() {
+    if (!state.user || !state.user.is_admin || state.isStreaming) return;
+    admModelMsg.classList.add("hidden");
+    admUserMsg.classList.add("hidden");
+    adminModal.classList.remove("hidden");
+
+    try {
+      const res = await fetch("/api/admin/settings");
+      if (!res.ok) {
+        showAdminMsg(admModelMsg, "加载后台配置失败。", false);
+        return;
+      }
+      const data = await res.json();
+      state.adminPresets = data.presets || [];
+      applySettingsToAdminForm(data.settings || {});
+      await loadAdminUsers();
+    } catch (_) {
+      showAdminMsg(admModelMsg, "加载后台配置时网络异常。", false);
+    }
+  }
+
+  function collectAdminModelPayload() {
+    return {
+      provider: admProvider.value,
+      model_name: admModel.value.trim(),
+      base_url: admBaseUrl.value.trim(),
+      reasoning_effort: admEffort.value,
+      fallback_model: admFallback.value.trim(),
+      deepseek_api_key: admDeepseekKey.value.trim(),
+      gemini_api_key: admGeminiKey.value.trim(),
+      custom_api_key: admCustomKey.value.trim(),
+    };
+  }
+
+  // --------------------------------------------------------------------------
+  // 登录与初始化引导
+  // --------------------------------------------------------------------------
+
+  async function enterChatSession() {
+    const ok = await refreshConversations();
+    if (!ok) return;
+    const firstConv = state.conversations[0] || null;
+    if (firstConv) {
+      await switchConversation(firstConv.id);
+    } else {
+      state.currentConversationId = null;
+      state.messages = [];
+    }
     showAppView();
   }
 
@@ -698,7 +1096,7 @@
       if (meRes.ok) {
         const meData = await meRes.json();
         state.user = meData.user;
-        await loadMessages();
+        await enterChatSession();
         return;
       }
     } catch (_) {}
@@ -726,7 +1124,7 @@
       }
       state.user = data.user;
       authPassword.value = "";
-      await loadMessages();
+      await enterChatSession();
     } catch (_) {
       authError.textContent = "网络异常，请稍后再试。";
       authError.classList.remove("hidden");
@@ -734,6 +1132,23 @@
       authSubmitBtn.disabled = false;
     }
   });
+
+  historyDrawerBtn.addEventListener("click", async function () {
+    if (state.isStreaming) return;
+    await refreshConversations();
+    drawerBackdrop.classList.remove("hidden");
+  });
+
+  drawerCloseBtn.addEventListener("click", function () {
+    drawerBackdrop.classList.add("hidden");
+  });
+
+  drawerBackdrop.addEventListener("click", function (evt) {
+    if (evt.target === drawerBackdrop) drawerBackdrop.classList.add("hidden");
+  });
+
+  newChatBtn.addEventListener("click", handleNewChat);
+  drawerNewChatBtn.addEventListener("click", handleNewChat);
 
   themeToggleBtn.addEventListener("click", function () {
     const current = document.documentElement.getAttribute("data-theme");
@@ -752,13 +1167,122 @@
   confirmOkBtn.addEventListener("click", async function () {
     confirmModal.classList.add("hidden");
     try {
-      const res = await fetch("/api/messages", { method: "DELETE" });
+      const url = state.currentConversationId
+        ? "/api/messages?conversation_id=" + encodeURIComponent(state.currentConversationId)
+        : "/api/messages";
+      const res = await fetch(url, { method: "DELETE" });
       if (res.ok) {
         state.messages = [];
         setChatError(null);
         renderMessages();
+        await refreshConversations();
       }
     } catch (_) {}
+  });
+
+  adminBtn.addEventListener("click", openAdminModal);
+  adminCloseBtn.addEventListener("click", function () {
+    adminModal.classList.add("hidden");
+  });
+  adminModal.addEventListener("click", function (evt) {
+    if (evt.target === adminModal) adminModal.classList.add("hidden");
+  });
+
+  adminTabs.forEach(function (tabBtn) {
+    tabBtn.addEventListener("click", function () {
+      const target = tabBtn.dataset.tab;
+      adminTabs.forEach(function (b) {
+        b.classList.toggle("active", b.dataset.tab === target);
+      });
+      adminTabModels.classList.toggle("hidden", target !== "models");
+      adminTabUsers.classList.toggle("hidden", target !== "users");
+    });
+  });
+
+  admProvider.addEventListener("change", function () {
+    if (admProvider.value === "deepseek") {
+      admBaseUrl.value = "https://api.deepseek.com/";
+      if (!admModel.value.trim() || admModel.value.startsWith("gemini-")) {
+        admModel.value = "deepseek-flash";
+      }
+    } else if (admProvider.value === "gemini") {
+      admBaseUrl.value = "https://generativelanguage.googleapis.com/v1beta/openai/";
+      if (!admModel.value.trim() || admModel.value.startsWith("deepseek-")) {
+        admModel.value = "gemini-4-hydrogen";
+      }
+    }
+    highlightMatchingPreset();
+  });
+
+  admModel.addEventListener("input", highlightMatchingPreset);
+
+  admTestBtn.addEventListener("click", async function () {
+    admTestBtn.disabled = true;
+    showAdminMsg(admModelMsg, "正在向模型发送连通性测试...", true);
+    try {
+      const res = await fetch("/api/admin/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(collectAdminModelPayload()),
+      });
+      const data = await res.json();
+      showAdminMsg(admModelMsg, data.detail || "测试完成", Boolean(data.ok));
+    } catch (_) {
+      showAdminMsg(admModelMsg, "测试请求失败，请检查网络。", false);
+    } finally {
+      admTestBtn.disabled = false;
+    }
+  });
+
+  admSaveBtn.addEventListener("click", async function () {
+    admSaveBtn.disabled = true;
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(collectAdminModelPayload()),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showAdminMsg(admModelMsg, data.detail || "保存失败。", false);
+        return;
+      }
+      applySettingsToAdminForm(data.settings);
+      showAdminMsg(
+        admModelMsg,
+        "已保存并立即生效！当前全站使用：" + data.settings.model_name,
+        true,
+      );
+    } catch (_) {
+      showAdminMsg(admModelMsg, "保存失败，请检查网络。", false);
+    } finally {
+      admSaveBtn.disabled = false;
+    }
+  });
+
+  admAddUserForm.addEventListener("submit", async function (evt) {
+    evt.preventDefault();
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: admNewUid.value.trim(),
+          password: admNewPwd.value,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showAdminMsg(admUserMsg, data.detail || "操作失败。", false);
+        return;
+      }
+      admNewUid.value = "";
+      admNewPwd.value = "";
+      showAdminMsg(admUserMsg, "成员密码已保存并立即生效。", true);
+      await loadAdminUsers();
+    } catch (_) {
+      showAdminMsg(admUserMsg, "网络异常，请稍后再试。", false);
+    }
   });
 
   logoutBtn.addEventListener("click", async function () {
@@ -767,6 +1291,8 @@
       await fetch("/api/auth/logout", { method: "POST" });
     } catch (_) {}
     state.user = null;
+    state.conversations = [];
+    state.currentConversationId = null;
     state.messages = [];
     clearSelectedImage();
     setChatError(null);

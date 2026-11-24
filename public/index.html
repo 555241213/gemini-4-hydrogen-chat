@@ -49,11 +49,24 @@
   <div id="app-view" class="app-view hidden">
     <header class="top-navbar">
       <div class="nav-left">
+        <button type="button" id="history-drawer-btn" class="icon-btn" title="历史对话列表" aria-label="历史对话列表">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="18" x2="15" y2="18"></line>
+          </svg>
+        </button>
         <span class="starburst-icon"></span>
         <span class="nav-title">星芒 AI</span>
         <span id="nav-user-pill" class="nav-user-pill" title="当前登录成员"></span>
       </div>
       <div class="nav-actions">
+        <button type="button" id="new-chat-btn" class="icon-btn" title="新建对话" aria-label="新建对话">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
         <button type="button" id="theme-toggle-btn" class="icon-btn" title="切换浅色/深色模式" aria-label="切换主题">
           <span id="theme-icon">☀️</span>
         </button>
@@ -64,6 +77,12 @@
             <path d="M10 11v6"></path>
             <path d="M14 11v6"></path>
             <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
+          </svg>
+        </button>
+        <button type="button" id="admin-btn" class="icon-btn hidden" title="管理员后台（切换模型 / 管理成员）" aria-label="管理员后台">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
           </svg>
         </button>
         <button type="button" id="logout-btn" class="icon-btn" title="退出登录" aria-label="退出登录">
@@ -146,11 +165,119 @@
     </div>
   </div>
 
+  <!-- 历史对话列表抽屉（按需展开） -->
+  <div id="drawer-backdrop" class="drawer-backdrop hidden">
+    <aside class="glass-card history-drawer" aria-label="历史对话">
+      <div class="drawer-header">
+        <span class="drawer-title">我的云端对话</span>
+        <button type="button" id="drawer-close-btn" class="icon-btn drawer-close-btn" aria-label="关闭">×</button>
+      </div>
+      <button type="button" id="drawer-new-chat-btn" class="primary-btn drawer-new-btn">
+        ＋ 新建对话
+      </button>
+      <div id="conversations-list" class="conversations-list"></div>
+    </aside>
+  </div>
+
+  <!-- 管理员后台弹窗（仅管理员可见） -->
+  <div id="admin-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="admin-title">
+    <div class="glass-card admin-card">
+      <div class="admin-header">
+        <div>
+          <h2 id="admin-title" class="admin-title">⚙️ 管理员后台</h2>
+          <p class="admin-subtitle">全站即时生效 · 支持在 DeepSeek V4.1 Flash 与 Gemini 4 之间自由切换</p>
+        </div>
+        <button type="button" id="admin-close-btn" class="icon-btn" aria-label="关闭后台">×</button>
+      </div>
+
+      <div class="admin-tabs">
+        <button type="button" class="admin-tab active" data-tab="models">模型与密钥</button>
+        <button type="button" class="admin-tab" data-tab="users">成员密码管理</button>
+      </div>
+
+      <!-- Tab 1: 模型与密钥 -->
+      <div id="admin-tab-models" class="admin-panel">
+        <div class="admin-section-label">快捷切换主力模型</div>
+        <div id="preset-grid" class="preset-grid"></div>
+
+        <div class="admin-form-grid">
+          <div class="field-group">
+            <label for="adm-provider">模型提供方</label>
+            <select id="adm-provider" class="glass-select">
+              <option value="gemini">Google Gemini</option>
+              <option value="deepseek">DeepSeek 官方</option>
+              <option value="custom">自定义 OpenAI 兼容</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label for="adm-model">模型 ID</label>
+            <input id="adm-model" type="text" placeholder="例如 deepseek-flash 或 gemini-4-hydrogen" />
+          </div>
+          <div class="field-group field-span-2">
+            <label for="adm-base-url">API Base URL</label>
+            <input id="adm-base-url" type="text" placeholder="https://api.deepseek.com/" />
+          </div>
+          <div class="field-group">
+            <label for="adm-effort">思考深度</label>
+            <select id="adm-effort" class="glass-select">
+              <option value="low">low（低 · 推荐日常）</option>
+              <option value="medium">medium（中）</option>
+              <option value="high">high（高）</option>
+              <option value="none">none（关闭，仅 DeepSeek 支持）</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label for="adm-fallback">503 备选模型（可留空）</label>
+            <input id="adm-fallback" type="text" placeholder="如 gemini-3.8-flash" />
+          </div>
+          <div class="field-group field-span-2">
+            <label for="adm-deepseek-key">
+              DeepSeek API Key <span id="adm-deepseek-status" class="key-badge"></span>
+            </label>
+            <input id="adm-deepseek-key" type="password" placeholder="留空保持现有 Key 不变；填入新 Key 则覆盖保存" autocomplete="off" />
+          </div>
+          <div class="field-group field-span-2">
+            <label for="adm-gemini-key">
+              Gemini API Key <span id="adm-gemini-status" class="key-badge"></span>
+            </label>
+            <input id="adm-gemini-key" type="password" placeholder="留空保持现有 Key 不变；填入新 Key 则覆盖保存" autocomplete="off" />
+          </div>
+          <div id="adm-custom-key-group" class="field-group field-span-2 hidden">
+            <label for="adm-custom-key">
+              自定义接口 API Key <span id="adm-custom-status" class="key-badge"></span>
+            </label>
+            <input id="adm-custom-key" type="password" placeholder="留空则沿用以上已配 Key" autocomplete="off" />
+          </div>
+        </div>
+
+        <div id="adm-model-msg" class="admin-msg hidden"></div>
+
+        <div class="admin-footer">
+          <button type="button" id="adm-test-btn" class="glass-action-btn admin-btn-lg">测试连通性</button>
+          <button type="button" id="adm-save-btn" class="primary-btn admin-save-btn">保存并立即生效</button>
+        </div>
+      </div>
+
+      <!-- Tab 2: 成员密码管理 -->
+      <div id="admin-tab-users" class="admin-panel hidden">
+        <div class="admin-section-label">当前成员列表（最多 10 人，各自记录严格隔离）</div>
+        <div id="adm-users-list" class="adm-users-list"></div>
+
+        <form id="adm-add-user-form" class="adm-add-user-form">
+          <input id="adm-new-uid" type="text" maxlength="24" placeholder="成员昵称（如：小红）" required />
+          <input id="adm-new-pwd" type="password" minlength="4" maxlength="128" placeholder="专属密码（至少 4 位）" required />
+          <button type="submit" class="primary-btn adm-add-btn">添加 / 改密</button>
+        </form>
+        <div id="adm-user-msg" class="admin-msg hidden"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- 轻量化清空确认弹窗 -->
   <div id="confirm-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
     <div class="glass-card confirm-card">
       <h2 id="confirm-title" class="confirm-title">清空当前对话？</h2>
-      <p class="confirm-desc">这会永久删除你账号下的云端聊天记录与已上传的图片，且无法恢复。</p>
+      <p class="confirm-desc">这会永久删除当前这一条对话里的云端聊天记录与图片，且无法恢复。</p>
       <div class="confirm-actions">
         <button type="button" id="confirm-cancel-btn" class="glass-action-btn">取消</button>
         <button type="button" id="confirm-ok-btn" class="danger-btn">确认清空</button>

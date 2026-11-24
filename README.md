@@ -1,69 +1,39 @@
-# 星芒 AI · 小圈子云端日常聊天网站（Cloudflare Pages + D1 免费版）
+# 星芒 AI · 小圈子云端日常聊天网站（Cloudflare Pages + D1）
 
-面向 **10 人以内内部小圈子** 的轻量日常多模态 AI 聊天网站，采用 **Cloudflare Pages + Pages Functions + Cloudflare D1 云数据库 + 原生「深邃毛玻璃风」前端**，零服务器月费，并支持绑定自定义域名（如 `hanxu555.dpdns.org`）改善国内免代理访问体验。
+面向 **10 人以内内部小圈子** 的轻量日常多模态 AI 聊天网站，采用 **Cloudflare Pages + Pages Functions + Cloudflare D1 云数据库 + 原生「深邃毛玻璃风」前端**，零服务器月费，支持绑定自定义域名，并提供管理员后台实时切换 **DeepSeek V4.1 Flash** 与 **Gemini 4** 系列模型。
 
 ---
 
 ## 核心特性
 
-- **一人一密 + 云端独立存储**：后台在 `USER_PASSWORDS` 中为最多 10 位成员每人配置一个专属密码；每位成员输入自己的密码登录后，聊天记录与压缩图片自动保存在 Cloudflare **D1** 云数据库中，按账号严格隔离，换设备或刷新后无缝续聊。
-- **纯净日常体验（「深邃毛玻璃风」）**：去掉侧边栏、Token 面板、System Prompt 编辑器、模型切换、思考过程折叠与欢迎快捷卡片，默认深色模式并支持顶部一键切换浅色/深色。
-- **零外部 CDN 依赖**：Markdown 渲染与代码卡片复制全部内置，所有静态资源仅从你自己的域名加载。
+- **管理员后台（实时切换模型与成员管理）**：
+  - 使用管理员密码登录后，顶部导航栏出现 **⚙️ 管理后台** 按钮（普通成员不可见且后端严格鉴权 `403`）。
+  - 支持在 **DeepSeek V4.1 Flash（`deepseek-flash`）**、**Gemini 4 Hydrogen / Argon / Neon**、**Gemini 3.8 Flash** 以及自定义 OpenAI 兼容端点之间一键切换，无需重启或重部署。
+  - 支持在后台填写/更新 `DeepSeek API Key` 与 `Gemini API Key`（脱敏回显，不暴露明文）、测试连通性，以及在线增删/修改圈子成员密码。
+- **用户端「新建对话」与云端多对话管理**：
+  - 点击顶部 **`＋`** 一键开启新对话；点击左上角 **`☰`** 滑出毛玻璃对话列表抽屉，随时切换、续聊或单独删除某条历史对话。
+  - 每位成员拥有独立的 D1 云端会话与图片存储，刷新或换设备无缝续聊，彼此严格隔离。
 - **成本与稳定性防线**：
-  - 默认模型 `gemini-4-hydrogen`（通过 Google Gemini OpenAI 兼容端点调用），API Key 仅保存在服务端，绝不暴露到前端。
-  - 单次输入上限 `12,000` 字符、单次输出上限 `4,096` tokens、默认 `reasoning_effort="low"`、`timeout=60s`。
-  - 浏览器端自动将图片白底合成、长边缩放至 `<=1024px` 并压缩为 JPEG（质量 80）；请求模型时仅截取最近 `6` 轮上下文，且**仅当前提问轮次发送图片**。
+  - API Key 仅保存在服务端与 D1，绝不暴露到前端；单次输入上限 `12,000` 字符、单次输出上限 `4,096` tokens、默认 `reasoning_effort="low"`、`timeout=60s`。
+  - 浏览器端自动将图片白底合成、长边缩放至 `<=1024px` 并压缩为 JPEG（质量 80）；每次请求仅截取当前对话最近 `6` 轮上下文，且**仅当前提问轮次传图**。
+  - Gemini 4 主模型遇到高峰 `HTTP 503` 时自动短等重试并回退到 `gemini-3.8-flash`。
 
 ---
 
-## 快速部署指南（Cloudflare Pages + D1）
+## 环境变量与管理员配置（Cloudflare Pages → Variables and Secrets）
 
-### 第一步：将 `hanxu555.dpdns.org` 接入 Cloudflare DNS
-1. 登录 [Cloudflare 控制台](https://dash.cloudflare.com/)，点击 **Add a domain**，输入 `hanxu555.dpdns.org`，选择 **Free** 免费计划。
-2. 复制 Cloudflare 分配给你的两组 **Nameservers（NS 记录）**。
-3. 前往 DigitalPlat FreeDomain 控制台修改 `hanxu555.dpdns.org` 的 NS 记录为这两组 Cloudflare NS 地址，等待几分钟生效。
-
-### 第二步：创建免费的 Cloudflare D1 云数据库
-1. 在 Cloudflare 控制台左侧进入 **Storage & Databases → D1 SQL Database** → 点击 **Create**。
-2. 数据库名称填 `xingmang-chat-db`（位置选默认即可），点击 **Create**。
-   > 应用首次运行会自动建表，无需手动执行 SQL；如需手动建表也可在 Console 中粘贴 [schema.sql](schema.sql)。
-
-### 第三步：连接 GitHub 仓库部署 Pages
-1. 在 Cloudflare 控制台进入 **Workers & Pages → Create → Pages → Connect to Git**。
-2. 选择仓库 `555241213/gemini-4-hydrogen-chat`（分支 `main`）：
-   - **Framework preset**：`None`
-   - **Build command**：留空
-   - **Build output directory**：`public`
-3. 点击 **Save and Deploy** 完成首次构建。
-
-### 第四步：绑定 D1 数据库与配置环境变量
-1. 进入刚刚部署的 Pages 项目 → **Settings → Bindings**（或 **Functions → D1 database bindings**）：
-   - 点击 **Add** → 选择 **D1 database**
-   - **Variable name**：严格填写 `DB`
-   - **D1 database**：选择 `xingmang-chat-db`
-2. 进入 **Settings → Variables and Secrets**，添加以下必填项（建议选择 **Encrypt** 加密保存）：
-
-| 变量名 | 必填 | 示例 / 说明 |
+| 变量名 | 必填 | 说明 |
 | :--- | :---: | :--- |
-| `GEMINI_API_KEY` | 是 | Google AI Studio 获取的 API Key |
-| `USER_PASSWORDS` | 是 | 一人一密配置（上限 10 人），支持 `小明:pass123,小红:pass456` 或 JSON `{"小明":"pass123","小红":"pass456"}` |
-| `MODEL_NAME` | 否 | 默认 `gemini-4-hydrogen` |
-| `BASE_URL` | 否 | 默认 `https://generativelanguage.googleapis.com/v1beta/openai/` |
-| `REASONING_EFFORT` | 否 | 默认 `low`（不要设为 `none`，留空则不传该字段） |
-| `SESSION_SECRET` | 否 | 可选；不填时系统会基于服务端密钥自动派生 |
-
-3. 进入 **Deployments** 对最新一次部署点击 **Retry deployment**，使绑定和环境变量生效。
-
-### 第五步：绑定自定义域名 `hanxu555.dpdns.org`
-1. 进入该 Pages 项目的 **Custom domains → Set up a custom domain**。
-2. 输入 `hanxu555.dpdns.org` 并确认，Cloudflare 会自动添加 DNS 记录与 HTTPS 证书。
-3. 证书签发完成后，将 `https://hanxu555.dpdns.org` 和各自的专属密码分别发给圈内成员即可。
+| `ADMIN_PASSWORD` | 推荐 | 管理员专属登录密码（或把 `USER_PASSWORDS` 中自己昵称设为 `admin` / `管理员`） |
+| `USER_PASSWORDS` | 是 | 成员密码列表，如 `小红:pass123,小明:pass456`（也可在管理员后台在线增删） |
+| `GEMINI_API_KEY` | 二选一 | Google AI Studio API Key（也可在管理员后台界面填写） |
+| `DEEPSEEK_API_KEY` | 二选一 | DeepSeek 官方 API Key（也可在管理员后台界面填写） |
+| `MODEL_NAME` | 否 | 初始默认模型，默认 `gemini-4-hydrogen` |
+| `REASONING_EFFORT` | 否 | 默认 `low`（Gemini 4 不支持设为 `none`） |
 
 ---
 
 ## 本地单元测试
-
-项目已包含基于 Node.js 内置测试运行器的单元测试（需 Node.js 20+）：
 
 ```bash
 node --test tests/unit.mjs

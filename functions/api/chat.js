@@ -1,14 +1,20 @@
 import { jsonResponse, requireAuthenticatedUser } from "../_lib/auth.js";
 import { loadConfig, MAX_IMAGE_DATA_URL_LEN, MAX_INPUT_CHARS } from "../_lib/config.js";
-import { insertMessage } from "../_lib/db.js";
+import {
+  createConversation,
+  getConversation,
+  insertMessage,
+  summarizeTitle,
+  updateConversationMeta,
+} from "../_lib/db.js";
 import { createChatSseResponse } from "../_lib/sse.js";
 
 export async function onRequestPost({ request, env }) {
   const config = loadConfig(env);
-  if (!config.configured) {
-    return jsonResponse({ detail: "服务尚未完成初始化配置。" }, 503);
+  if (!config.hasDb) {
+    return jsonResponse({ detail: "服务尚未完成数据库绑定。" }, 503);
   }
-  const user = await requireAuthenticatedUser(request, config);
+  const user = await requireAuthenticatedUser(request, config, env.DB);
   if (!user) {
     return jsonResponse({ detail: "未登录或登录已过期。" }, 401);
   }
@@ -24,6 +30,10 @@ export async function onRequestPost({ request, env }) {
   const imageDataUrl =
     typeof body.image_data_url === "string" && body.image_data_url.trim()
       ? body.image_data_url.trim()
+      : null;
+  let conversationId =
+    typeof body.conversation_id === "string" && body.conversation_id.trim()
+      ? body.conversation_id.trim()
       : null;
 
   if (!content && !imageDataUrl) {
@@ -44,8 +54,29 @@ export async function onRequestPost({ request, env }) {
     }
   }
 
+  let conversation = null;
+  let updatedConversation = null;
+
+  if (conversationId) {
+    conversation = await getConversation(env.DB, user.userId, conversationId);
+    if (!conversation) {
+      return jsonResponse({ detail: "目标对话不存在或已被删除。" }, 404);
+    }
+    if (conversation.title === "新对话") {
+      const nextTitle = summarizeTitle(content, Boolean(imageDataUrl));
+      await updateConversationMeta(env.DB, user.userId, conversationId, nextTitle);
+      updatedConversation = { ...conversation, title: nextTitle };
+    }
+  } else {
+    const title = summarizeTitle(content, Boolean(imageDataUrl));
+    conversation = await createConversation(env.DB, user.userId, title);
+    conversationId = conversation.id;
+    updatedConversation = conversation;
+  }
+
   const savedUserMsg = await insertMessage(env.DB, {
     userId: user.userId,
+    conversationId,
     role: "user",
     content,
     imageData: imageDataUrl,
@@ -55,6 +86,8 @@ export async function onRequestPost({ request, env }) {
     db: env.DB,
     config,
     userId: user.userId,
+    conversationId,
     preSavedUserMsg: savedUserMsg,
+    updatedConversation,
   });
 }
