@@ -1,131 +1,70 @@
----
-title: Gemini 4 Hydrogen AI Chat
-emoji: 🤖
-colorFrom: blue
-colorTo: indigo
-sdk: streamlit
-sdk_version: 1.43.0
-app_file: app.py
-pinned: false
----
+# 星芒 AI · 小圈子云端日常聊天网站（Cloudflare Pages + D1 免费版）
 
-# Gemini 4 Hydrogen 小圈子 AI 助手
-
-基于 **Streamlit** 与 **Google Gemini API（OpenAI 兼容模式）** 构建的轻量级多模态 AI 聊天机器人，默认接入 **`gemini-4-hydrogen`** 模型，专为 **10 人以内内部小圈子**设计，在严格控制 API 成本的前提下提供流畅的对话体验。
+面向 **10 人以内内部小圈子** 的轻量日常多模态 AI 聊天网站，采用 **Cloudflare Pages + Pages Functions + Cloudflare D1 云数据库 + 原生「深邃毛玻璃风」前端**，零服务器月费，并支持绑定自定义域名（如 `hanxu555.dpdns.org`）改善国内免代理访问体验。
 
 ---
 
-## 核心特性与成本控制
+## 核心特性
 
-- **安全访问门禁**：零硬编码密钥；启动时强制校验环境变量，支持 `hmac.compare_digest` 常量时间密码比对与错误延迟防爆破，未登录时彻底阻断侧边栏与聊天界面渲染。
-- **展示完整、发送截断**：页面完整保留所有历史消息，但每次 API 请求仅发送最近 $N$ 轮上下文（侧边栏可调 `2–12` 轮，默认 `6` 轮）。
-- **低成本多模态识图**：自动校正手机照片 EXIF 方向、透明通道白底合成 RGB、长边等比缩放至 `1024px` 以内并转 JPEG（质量 80）；历史图片留在界面供回顾，但仅在当前提问轮次发送给模型，后续纯文字追问不重复消耗图片 Token。
-- **输入 / 输出与思考深度兜底**：单次输入上限 `12,000` 字符、单次输出上限 `4,096` tokens、默认 `reasoning_effort="low"`、客户端显式配置 `timeout=60.0` 与 `max_retries=1`。
-- **完整交互体验**：流式输出（首字前加载提示、思考过程折叠展示）、实时 Token 消耗统计（上一轮 / 本次会话累计）、System Prompt 预设与热切换、重新生成（支持重传图片）与防连点保护、一键导出 Markdown、异常不污染历史记录。
-
----
-
-## 第一步：获取 Google AI Studio API Key
-
-1. 访问 [Google AI Studio](https://aistudio.google.com/) 并使用 Google 账号登录。
-2. 在左侧导航栏或顶部菜单点击 **Get API key**（获取 API 密钥）。
-3. 点击 **Create API key**（创建 API 密钥），选择或新建一个 Google Cloud 项目，生成以 `AIza...` 开头的密钥。
-4. 复制并妥善保存该密钥（**切勿提交到公开仓库或分享给他人**）。
-5. 建议在 Google AI Studio / Google Cloud Console 中为该 Key 绑定预算告警（Budget Alert），进一步管控月度费用。
+- **一人一密 + 云端独立存储**：后台在 `USER_PASSWORDS` 中为最多 10 位成员每人配置一个专属密码；每位成员输入自己的密码登录后，聊天记录与压缩图片自动保存在 Cloudflare **D1** 云数据库中，按账号严格隔离，换设备或刷新后无缝续聊。
+- **纯净日常体验（「深邃毛玻璃风」）**：去掉侧边栏、Token 面板、System Prompt 编辑器、模型切换、思考过程折叠与欢迎快捷卡片，默认深色模式并支持顶部一键切换浅色/深色。
+- **零外部 CDN 依赖**：Markdown 渲染与代码卡片复制全部内置，所有静态资源仅从你自己的域名加载。
+- **成本与稳定性防线**：
+  - 默认模型 `gemini-4-hydrogen`（通过 Google Gemini OpenAI 兼容端点调用），API Key 仅保存在服务端，绝不暴露到前端。
+  - 单次输入上限 `12,000` 字符、单次输出上限 `4,096` tokens、默认 `reasoning_effort="low"`、`timeout=60s`。
+  - 浏览器端自动将图片白底合成、长边缩放至 `<=1024px` 并压缩为 JPEG（质量 80）；请求模型时仅截取最近 `6` 轮上下文，且**仅当前提问轮次发送图片**。
 
 ---
 
-## 第二步：部署到 Streamlit Community Cloud（推荐 · 免费）
+## 快速部署指南（Cloudflare Pages + D1）
 
-1. 将本项目的 `app.py`、`requirements.txt`、`README.md` 推送到 GitHub 仓库（公开或私有仓库均可）。
-2. 访问 [Streamlit Community Cloud](https://share.streamlit.io/) 并使用 GitHub 账号登录。
-3. 点击 **Create app** → **Deploy a public app from GitHub**（或选择已有仓库）：
-   - **Repository**：选择你的 GitHub 仓库
-   - **Branch**：`main`
-   - **Main file path**：`app.py`
-4. 点击 **Advanced settings...**，在 **Secrets** 文本框中按 TOML 格式填写必填密钥（也可部署后再进入 **Settings → Secrets** 修改）：
+### 第一步：将 `hanxu555.dpdns.org` 接入 Cloudflare DNS
+1. 登录 [Cloudflare 控制台](https://dash.cloudflare.com/)，点击 **Add a domain**，输入 `hanxu555.dpdns.org`，选择 **Free** 免费计划。
+2. 复制 Cloudflare 分配给你的两组 **Nameservers（NS 记录）**。
+3. 前往 DigitalPlat FreeDomain 控制台修改 `hanxu555.dpdns.org` 的 NS 记录为这两组 Cloudflare NS 地址，等待几分钟生效。
 
-```toml
-GEMINI_API_KEY = "你的_Google_AI_Studio_API_Key"
-ACCESS_PASSWORD = "你的强访问密码"
+### 第二步：创建免费的 Cloudflare D1 云数据库
+1. 在 Cloudflare 控制台左侧进入 **Storage & Databases → D1 SQL Database** → 点击 **Create**。
+2. 数据库名称填 `xingmang-chat-db`（位置选默认即可），点击 **Create**。
+   > 应用首次运行会自动建表，无需手动执行 SQL；如需手动建表也可在 Console 中粘贴 [schema.sql](schema.sql)。
 
-# 以下为可选项（不填则使用默认值）
-# MODEL_NAME = "gemini-4-hydrogen"
-# BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-# REASONING_EFFORT = "low"
-```
+### 第三步：连接 GitHub 仓库部署 Pages
+1. 在 Cloudflare 控制台进入 **Workers & Pages → Create → Pages → Connect to Git**。
+2. 选择仓库 `555241213/gemini-4-hydrogen-chat`（分支 `main`）：
+   - **Framework preset**：`None`
+   - **Build command**：留空
+   - **Build output directory**：`public`
+3. 点击 **Save and Deploy** 完成首次构建。
 
-5. 点击 **Save** → **Deploy!**，等待依赖安装完成后即可通过生成的 `.streamlit.app` 链接访问。
+### 第四步：绑定 D1 数据库与配置环境变量
+1. 进入刚刚部署的 Pages 项目 → **Settings → Bindings**（或 **Functions → D1 database bindings**）：
+   - 点击 **Add** → 选择 **D1 database**
+   - **Variable name**：严格填写 `DB`
+   - **D1 database**：选择 `xingmang-chat-db`
+2. 进入 **Settings → Variables and Secrets**，添加以下必填项（建议选择 **Encrypt** 加密保存）：
 
----
-
-## 备选部署：Hugging Face Spaces（需 PRO 订阅 / Docker）
-
-### 1. 创建 Streamlit Space
-
-1. 登录 [Hugging Face](https://huggingface.co/)，点击右上角头像 → **New Space**。
-2. 填写 **Space name**（例如 `my-gemini-chat`）。
-3. **Select the Space SDK** 选择 **Streamlit**。
-4. **Visibility（可见性）** 建议优先选择 **Private**（如希望圈内成员免登 Hugging Face 直接访问，也可设为 **Public**，通过本应用的 `ACCESS_PASSWORD` 门禁保护）。
-5. 硬件选择免费的 **CPU basic** 即可流畅运行，点击 **Create Space**。
-
-### 2. 上传项目文件
-
-将本项目的以下 3 个文件推送（或通过网页 **Files → Add file** 上传）到 Space 仓库根目录：
-
-- `app.py`
-- `requirements.txt`
-- `README.md`（保留顶部 `--- ... ---` YAML 配置块，已指定 `sdk: streamlit`、`sdk_version: 1.43.0` 与 `app_file: app.py`）
-
-### 3. 在 `Settings -> Secrets` 中配置环境变量（必填）
-
-1. 打开你的 Space 页面，点击顶部导航栏的 **Settings**。
-2. 向下滚动至 **Variables and secrets** 区域，点击 **New secret** 依次添加以下两个必填项：
-
-| Secret 名称 | 必填 | 说明 |
+| 变量名 | 必填 | 示例 / 说明 |
 | :--- | :---: | :--- |
-| `GEMINI_API_KEY` | 是 | 第一步从 Google AI Studio 获取的 API Key |
-| `ACCESS_PASSWORD` | 是 | 供小圈子内部成员登录使用的强密码（建议 12 位以上字母+数字组合） |
+| `GEMINI_API_KEY` | 是 | Google AI Studio 获取的 API Key |
+| `USER_PASSWORDS` | 是 | 一人一密配置（上限 10 人），支持 `小明:pass123,小红:pass456` 或 JSON `{"小明":"pass123","小红":"pass456"}` |
+| `MODEL_NAME` | 否 | 默认 `gemini-4-hydrogen` |
+| `BASE_URL` | 否 | 默认 `https://generativelanguage.googleapis.com/v1beta/openai/` |
+| `REASONING_EFFORT` | 否 | 默认 `low`（不要设为 `none`，留空则不传该字段） |
+| `SESSION_SECRET` | 否 | 可选；不填时系统会基于服务端密钥自动派生 |
 
-3. （可选）如需自定义模型、端点或思考深度，可在 **Variables** 或 **Secrets** 中配置以下可选项：
+3. 进入 **Deployments** 对最新一次部署点击 **Retry deployment**，使绑定和环境变量生效。
 
-| 变量名称 | 默认值 | 说明 |
-| :--- | :--- | :--- |
-| `MODEL_NAME` | `gemini-4-hydrogen` | 目标模型名称 |
-| `BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai/` | OpenAI 兼容端点地址 |
-| `REASONING_EFFORT` | `low` | 思考深度（如 `low` / `medium` / `high`）；**不要设为 `none`**；若显式设为空字符串，则请求时不传该字段（便于切换不支持此参数的模型） |
-
-4. 保存 Secrets 后，Space 会自动重启并构建；待状态变为 **Running** 后，即可在 **App** 标签页输入 `ACCESS_PASSWORD` 登录使用。
-
----
-
-## 本地运行指南（可选）
-
-确保本地已安装 **Python 3.10+**，在项目根目录执行：
-
-```bash
-pip install -r requirements.txt
-```
-
-### Linux / macOS
-
-```bash
-export GEMINI_API_KEY="你的_Google_AI_Studio_API_Key"
-export ACCESS_PASSWORD="你的访问密码"
-streamlit run app.py
-```
-
-### Windows (PowerShell)
-
-```powershell
-$env:GEMINI_API_KEY="你的_Google_AI_Studio_API_Key"
-$env:ACCESS_PASSWORD="你的访问密码"
-streamlit run app.py
-```
+### 第五步：绑定自定义域名 `hanxu555.dpdns.org`
+1. 进入该 Pages 项目的 **Custom domains → Set up a custom domain**。
+2. 输入 `hanxu555.dpdns.org` 并确认，Cloudflare 会自动添加 DNS 记录与 HTTPS 证书。
+3. 证书签发完成后，将 `https://hanxu555.dpdns.org` 和各自的专属密码分别发给圈内成员即可。
 
 ---
 
-## 注意事项
+## 本地单元测试
 
-- Streamlit 刷新页面或 Hugging Face 免费 Space 休眠会重置内存中的会话历史；重要对话请随时点击侧边栏 **导出对话 (.md)** 保存到本地。
-- 如成员变动，只需在 Space 的 `Settings → Variables and secrets` 修改 `ACCESS_PASSWORD` 即可即时失效旧密码。
+项目已包含基于 Node.js 内置测试运行器的单元测试（需 Node.js 20+）：
+
+```bash
+node --test tests/unit.mjs
+```

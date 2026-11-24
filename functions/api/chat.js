@@ -1,0 +1,60 @@
+import { jsonResponse, requireAuthenticatedUser } from "../_lib/auth.js";
+import { loadConfig, MAX_IMAGE_DATA_URL_LEN, MAX_INPUT_CHARS } from "../_lib/config.js";
+import { insertMessage } from "../_lib/db.js";
+import { createChatSseResponse } from "../_lib/sse.js";
+
+export async function onRequestPost({ request, env }) {
+  const config = loadConfig(env);
+  if (!config.configured) {
+    return jsonResponse({ detail: "服务尚未完成初始化配置。" }, 503);
+  }
+  const user = await requireAuthenticatedUser(request, config);
+  if (!user) {
+    return jsonResponse({ detail: "未登录或登录已过期。" }, 401);
+  }
+
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ detail: "请求数据格式错误。" }, 400);
+  }
+
+  const content = typeof body.content === "string" ? body.content.trim() : "";
+  const imageDataUrl =
+    typeof body.image_data_url === "string" && body.image_data_url.trim()
+      ? body.image_data_url.trim()
+      : null;
+
+  if (!content && !imageDataUrl) {
+    return jsonResponse({ detail: "请输入内容或上传一张图片后再发送。" }, 400);
+  }
+  if (content.length > MAX_INPUT_CHARS) {
+    return jsonResponse(
+      { detail: `单次输入长度不能超过 ${MAX_INPUT_CHARS.toLocaleString()} 个字符。` },
+      400,
+    );
+  }
+  if (imageDataUrl) {
+    if (!imageDataUrl.startsWith("data:image/jpeg;base64,")) {
+      return jsonResponse({ detail: "图片格式无效，请重新选择图片上传。" }, 400);
+    }
+    if (imageDataUrl.length > MAX_IMAGE_DATA_URL_LEN) {
+      return jsonResponse({ detail: "图片压缩后仍过大，请换一张较小的图片。" }, 400);
+    }
+  }
+
+  const savedUserMsg = await insertMessage(env.DB, {
+    userId: user.userId,
+    role: "user",
+    content,
+    imageData: imageDataUrl,
+  });
+
+  return createChatSseResponse({
+    db: env.DB,
+    config,
+    userId: user.userId,
+    preSavedUserMsg: savedUserMsg,
+  });
+}
