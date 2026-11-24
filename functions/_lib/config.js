@@ -8,7 +8,7 @@ export const DEFAULT_ALIYUN_MAAS_BASE_URL = "https://maas.qianwenaiapi.com/compa
 
 export const DEFAULT_BASE_URL = DEFAULT_GEMINI_BASE_URL;
 export const DEFAULT_MODEL_NAME = "gemini-4-hydrogen";
-export const DEFAULT_FALLBACK_MODEL = "gemini-3.8-flash";
+export const DEFAULT_FALLBACK_MODEL = "gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash-lite";
 export const DEFAULT_REASONING_EFFORT = "low";
 
 export const DEFAULT_SYSTEM_PROMPT =

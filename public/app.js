@@ -947,14 +947,20 @@
       btn.appendChild(desc);
 
       btn.addEventListener("click", function () {
+        const currentUrl = admBaseUrl.value.trim();
+        const isCurrentRelay =
+          currentUrl.includes("vercel.app") && preset.provider === "gemini";
+
         admProvider.value = preset.provider;
         admModel.value = preset.modelName;
-        admBaseUrl.value = preset.baseUrl;
+        admBaseUrl.value = isCurrentRelay ? currentUrl : preset.baseUrl;
         admEffort.value = preset.defaultEffort || "low";
         if (preset.provider === "deepseek") {
           admFallback.value = "";
-        } else if (preset.modelName === "gemini-4-hydrogen" && !admFallback.value.trim()) {
-          admFallback.value = "gemini-3.8-flash";
+        } else if (preset.modelName === "gemini-4-hydrogen") {
+          admFallback.value = "gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash-lite";
+        } else if (preset.provider === "gemini" && !admFallback.value.trim()) {
+          admFallback.value = "gemini-3.6-flash,gemini-3.5-flash-lite";
         }
         highlightMatchingPreset();
       });

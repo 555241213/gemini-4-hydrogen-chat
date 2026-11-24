@@ -178,20 +178,27 @@ export function createChatSseResponse({
           runtime.activeApiKey,
         );
 
-        // 仅在 503（未计费且为临时高峰拥堵）时短暂等待后重试一次；若仍 503 且有同厂商备选模型则自动切换
+        // 仅在 503（未计费且为临时高峰拥堵）时短暂等待后重试一次；若仍 503 则依次尝试备选模型链
         if (upstreamRes.status === 503) {
-          await new Promise((resolve) => setTimeout(resolve, 800));
+          await new Promise((resolve) => setTimeout(resolve, 600));
           upstreamRes = await requestUpstream(
             runtime.modelName,
             runtime.baseUrl,
             runtime.activeApiKey,
           );
           if (upstreamRes.status === 503 && runtime.fallbackModel) {
-            upstreamRes = await requestUpstream(
-              runtime.fallbackModel,
-              runtime.baseUrl,
-              runtime.activeApiKey,
-            );
+            const fallbackList = runtime.fallbackModel
+              .split(",")
+              .map((m) => m.trim())
+              .filter((m) => m && m !== runtime.modelName);
+            for (const fbModel of fallbackList) {
+              upstreamRes = await requestUpstream(
+                fbModel,
+                runtime.baseUrl,
+                runtime.activeApiKey,
+              );
+              if (upstreamRes.status !== 503) break;
+            }
           }
         }
 

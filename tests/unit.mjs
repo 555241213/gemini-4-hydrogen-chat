@@ -399,6 +399,45 @@ test("admin switching between DeepSeek V4.1 Flash and Gemini 4 persists in D1", 
   });
   await resFallbackAdmin.text();
   assert.equal(requestedSystem, "你是一只傲娇但很靠谱的电子小猫。");
+
+  // 503 多级备选模型链自动顺延回退（4-hydrogen -> 3.8-flash -> 3.6-flash）
+  await setAppSetting(db, "active_provider", "gemini");
+  await setAppSetting(db, "active_model", "gemini-4-hydrogen");
+  await setAppSetting(db, "active_base_url", "https://gemini-us-relay-six.vercel.app/v1beta/openai/");
+  await setAppSetting(db, "fallback_model", "gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash-lite");
+
+  const chainModels = [];
+  const resChain = createChatSseResponse({
+    db,
+    config,
+    userId: "admin",
+    conversationId: conv.id,
+    fetchImpl: async (_, init) => {
+      const m = JSON.parse(init.body).model;
+      chainModels.push(m);
+      if (m === "gemini-4-hydrogen" || m === "gemini-3.8-flash") {
+        return new Response(JSON.stringify({ error: { message: "high demand" } }), { status: 503 });
+      }
+      return new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"3.6成功"}}]}\n\n'));
+            c.enqueue(encoder.encode("data: [DONE]\n\n"));
+            c.close();
+          },
+        }),
+        { status: 200 },
+      );
+    },
+  });
+  const chainText = await resChain.text();
+  assert.match(chainText, /3\.6成功/);
+  assert.deepEqual(chainModels, [
+    "gemini-4-hydrogen",
+    "gemini-4-hydrogen",
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+  ]);
 });
 
 test("buildApiMessages sliding window and single-turn image strategy", () => {
