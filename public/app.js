@@ -116,8 +116,11 @@
 
   // 确认与图片放大弹窗
   const confirmModal = document.getElementById("confirm-modal");
+  const confirmTitleEl = document.getElementById("confirm-title");
+  const confirmDescEl = confirmModal.querySelector(".confirm-desc");
   const confirmCancelBtn = document.getElementById("confirm-cancel-btn");
   const confirmOkBtn = document.getElementById("confirm-ok-btn");
+  let pendingConfirmHandler = null;
   const lightboxModal = document.getElementById("lightbox-modal");
   const lightboxImg = document.getElementById("lightbox-img");
 
@@ -223,8 +226,12 @@
     sendBtn.disabled = busy;
     retryBtn.disabled = busy;
 
-    const regenBtn = messagesList.querySelector(".regen-action-btn");
-    if (regenBtn) regenBtn.disabled = busy;
+    const actionBtns = messagesList.querySelectorAll(
+      ".regen-action-btn, .edit-action-btn, .rollback-action-btn",
+    );
+    actionBtns.forEach(function (btn) {
+      btn.disabled = busy;
+    });
   }
 
   function setChatError(msg) {
@@ -410,6 +417,54 @@
   // 消息渲染
   // --------------------------------------------------------------------------
 
+  function openConfirmDialog(opts) {
+    confirmTitleEl.textContent = opts.title || "确认操作？";
+    confirmDescEl.textContent = opts.desc || "";
+    confirmOkBtn.textContent = opts.okText || "确认";
+    pendingConfirmHandler = typeof opts.onConfirm === "function" ? opts.onConfirm : null;
+    confirmModal.classList.remove("hidden");
+  }
+
+  async function handleRollbackFromMessage(msgId) {
+    if (state.isStreaming || !state.currentConversationId || !msgId) return;
+    openConfirmDialog({
+      title: "删除并回溯到此处？",
+      desc: "这会删除该条消息以及它之后的所有对话记录，方便你重新接着聊或修改提问，且无法恢复。",
+      okText: "确认删除并回溯",
+      onConfirm: async function () {
+        try {
+          const url =
+            "/api/messages?conversation_id=" +
+            encodeURIComponent(state.currentConversationId) +
+            "&from_id=" +
+            encodeURIComponent(msgId);
+          const res = await fetch(url, { method: "DELETE" });
+          if (res.status === 401) {
+            state.user = null;
+            showAuthView();
+            return;
+          }
+          if (!res.ok) {
+            const err = await res.json().catch(function () { return {}; });
+            setChatError(err.detail || "回溯删除失败，请稍后重试。");
+            return;
+          }
+          const idx = state.messages.findIndex(function (m) {
+            return m.id === msgId;
+          });
+          if (idx >= 0) {
+            state.messages = state.messages.slice(0, idx);
+          }
+          setChatError(null);
+          renderMessages();
+          await refreshConversations();
+        } catch (_) {
+          setChatError("回溯删除时网络异常，请重试。");
+        }
+      },
+    });
+  }
+
   function createUserMessageElement(msg) {
     const row = document.createElement("div");
     row.className = "user-msg-row";
@@ -442,6 +497,22 @@
     }
 
     row.appendChild(bubble);
+
+    if (msg.id) {
+      const userActions = document.createElement("div");
+      userActions.className = "user-msg-actions";
+      const rollbackBtn = document.createElement("button");
+      rollbackBtn.type = "button";
+      rollbackBtn.className = "glass-action-btn rollback-action-btn";
+      rollbackBtn.textContent = "🗑 回溯删除";
+      rollbackBtn.disabled = state.isStreaming;
+      rollbackBtn.addEventListener("click", function () {
+        handleRollbackFromMessage(msg.id);
+      });
+      userActions.appendChild(rollbackBtn);
+      row.appendChild(userActions);
+    }
+
     return row;
   }
 
@@ -480,6 +551,92 @@
       }
     });
     actions.appendChild(copyBtn);
+
+    if (msg.id) {
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "glass-action-btn edit-action-btn";
+      editBtn.textContent = "✎ 编辑";
+      editBtn.disabled = state.isStreaming;
+      editBtn.addEventListener("click", function () {
+        if (state.isStreaming || row.querySelector(".msg-edit-box")) return;
+        body.classList.add("hidden");
+        actions.classList.add("hidden");
+
+        const editBox = document.createElement("div");
+        editBox.className = "msg-edit-box";
+        const ta = document.createElement("textarea");
+        ta.className = "glass-textarea";
+        ta.rows = Math.min(12, Math.max(3, String(msg.content || "").split("\n").length + 1));
+        ta.value = msg.content || "";
+
+        const btnRow = document.createElement("div");
+        btnRow.className = "msg-edit-actions";
+        const cancelEditBtn = document.createElement("button");
+        cancelEditBtn.type = "button";
+        cancelEditBtn.className = "glass-action-btn";
+        cancelEditBtn.textContent = "取消";
+        const saveEditBtn = document.createElement("button");
+        saveEditBtn.type = "button";
+        saveEditBtn.className = "primary-btn";
+        saveEditBtn.style.padding = "6px 14px";
+        saveEditBtn.style.fontSize = "0.82rem";
+        saveEditBtn.textContent = "保存修改";
+
+        cancelEditBtn.addEventListener("click", function () {
+          editBox.remove();
+          body.classList.remove("hidden");
+          actions.classList.remove("hidden");
+        });
+
+        saveEditBtn.addEventListener("click", async function () {
+          const nextContent = ta.value.trim();
+          if (!nextContent) return;
+          saveEditBtn.disabled = true;
+          try {
+            const res = await fetch("/api/messages", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ message_id: msg.id, content: nextContent }),
+            });
+            if (res.status === 401) {
+              state.user = null;
+              showAuthView();
+              return;
+            }
+            const data = await res.json().catch(function () { return {}; });
+            if (!res.ok) {
+              setChatError(data.detail || "保存修改失败。");
+              return;
+            }
+            msg.content = (data.message && data.message.content) || nextContent;
+            renderMessages();
+          } catch (_) {
+            setChatError("保存修改时网络异常。");
+          } finally {
+            saveEditBtn.disabled = false;
+          }
+        });
+
+        btnRow.appendChild(cancelEditBtn);
+        btnRow.appendChild(saveEditBtn);
+        editBox.appendChild(ta);
+        editBox.appendChild(btnRow);
+        row.appendChild(editBox);
+        ta.focus();
+      });
+      actions.appendChild(editBtn);
+
+      const rollbackBtn = document.createElement("button");
+      rollbackBtn.type = "button";
+      rollbackBtn.className = "glass-action-btn rollback-action-btn";
+      rollbackBtn.textContent = "🗑 回溯删除";
+      rollbackBtn.disabled = state.isStreaming;
+      rollbackBtn.addEventListener("click", function () {
+        handleRollbackFromMessage(msg.id);
+      });
+      actions.appendChild(rollbackBtn);
+    }
 
     if (isLastAssistant) {
       const regenBtn = document.createElement("button");
@@ -1284,27 +1441,39 @@
 
   clearBtn.addEventListener("click", function () {
     if (state.isStreaming || !state.messages.length) return;
-    confirmModal.classList.remove("hidden");
+    openConfirmDialog({
+      title: "清空当前对话？",
+      desc: "这会永久删除当前这一条对话里的云端聊天记录与图片，且无法恢复。",
+      okText: "确认清空",
+      onConfirm: async function () {
+        try {
+          const url = state.currentConversationId
+            ? "/api/messages?conversation_id=" + encodeURIComponent(state.currentConversationId)
+            : "/api/messages";
+          const res = await fetch(url, { method: "DELETE" });
+          if (res.ok) {
+            state.messages = [];
+            setChatError(null);
+            renderMessages();
+            await refreshConversations();
+          }
+        } catch (_) {}
+      },
+    });
   });
 
   confirmCancelBtn.addEventListener("click", function () {
+    pendingConfirmHandler = null;
     confirmModal.classList.add("hidden");
   });
 
   confirmOkBtn.addEventListener("click", async function () {
     confirmModal.classList.add("hidden");
-    try {
-      const url = state.currentConversationId
-        ? "/api/messages?conversation_id=" + encodeURIComponent(state.currentConversationId)
-        : "/api/messages";
-      const res = await fetch(url, { method: "DELETE" });
-      if (res.ok) {
-        state.messages = [];
-        setChatError(null);
-        renderMessages();
-        await refreshConversations();
-      }
-    } catch (_) {}
+    const handler = pendingConfirmHandler;
+    pendingConfirmHandler = null;
+    if (handler) {
+      await handler();
+    }
   });
 
   adminBtn.addEventListener("click", openAdminModal);

@@ -14,12 +14,14 @@ import {
   clearUserConversationMessages,
   createConversation,
   deleteConversation,
+  deleteMessagesFromId,
   insertMessage,
   listConversationMessages,
   listUserConversations,
   resolveRuntimeSettings,
   setAppSetting,
   setUserPersona,
+  updateMessageContent,
   upsertManagedUser,
 } from "../functions/_lib/db.js";
 
@@ -86,6 +88,21 @@ function createMockD1() {
             for (let i = messages.length - 1; i >= 0; i -= 1) {
               if (messages[i].id === id && messages[i].user_id === userId) messages.splice(i, 1);
             }
+            return { success: true };
+          }
+          if (sql.startsWith("DELETE FROM messages WHERE user_id = ? AND conversation_id = ? AND id >= ?")) {
+            const [userId, convId, fromId] = params;
+            for (let i = messages.length - 1; i >= 0; i -= 1) {
+              if (messages[i].user_id === userId && messages[i].conversation_id === convId && messages[i].id >= fromId) {
+                messages.splice(i, 1);
+              }
+            }
+            return { success: true };
+          }
+          if (sql.startsWith("UPDATE messages SET content = ? WHERE id = ? AND user_id = ?")) {
+            const [content, id, userId] = params;
+            const m = messages.find((x) => x.id === id && x.user_id === userId);
+            if (m) m.content = content;
             return { success: true };
           }
           if (sql.startsWith("DELETE FROM messages WHERE user_id = ? AND conversation_id = ?")) {
@@ -190,6 +207,10 @@ function createMockD1() {
               .filter((m) => m.user_id === userId && !m.conversation_id)
               .sort((a, b) => a.id - b.id);
             return list[0] || null;
+          }
+          if (sql.includes("FROM messages WHERE id = ? AND user_id = ?")) {
+            const [id, userId] = params;
+            return messages.find((m) => m.id === id && m.user_id === userId) || null;
           }
           if (sql.includes("FROM conversations WHERE id = ? AND user_id = ?")) {
             const [id, userId] = params;
@@ -455,4 +476,21 @@ test("buildApiMessages sliding window and single-turn image strategy", () => {
   assert.equal(msgs[2].content, "a2");
   assert.ok(Array.isArray(msgs[3].content));
   assert.equal(msgs[3].content[1].image_url.url, "data:image/jpeg;base64,CURR3");
+});
+
+test("message edit and cascade rollback deleteMessagesFromId", async () => {
+  const db = createMockD1();
+  const conv = await createConversation(db, "alice", "回溯测试");
+  const m1 = await insertMessage(db, { userId: "alice", conversationId: conv.id, role: "user", content: "第一句" });
+  const m2 = await insertMessage(db, { userId: "alice", conversationId: conv.id, role: "assistant", content: "原始回复" });
+  const m3 = await insertMessage(db, { userId: "alice", conversationId: conv.id, role: "user", content: "后续追问" });
+
+  const edited = await updateMessageContent(db, "alice", m2.id, "修改后的回复");
+  assert.equal(edited?.content, "修改后的回复");
+
+  await deleteMessagesFromId(db, "alice", conv.id, m2.id);
+  const left = await listConversationMessages(db, "alice", conv.id);
+  assert.equal(left.length, 1);
+  assert.equal(left[0].id, m1.id);
+  assert.notEqual(left[0].id, m3.id);
 });

@@ -300,6 +300,35 @@ export async function deleteMessageById(db, userId, id) {
     .run();
 }
 
+export async function getMessageById(db, userId, id) {
+  await ensureSchema(db);
+  const row = await db
+    .prepare(
+      "SELECT id, msg_uid, conversation_id, role, content, image_data, created_at " +
+        "FROM messages WHERE id = ? AND user_id = ?",
+    )
+    .bind(id, userId)
+    .first();
+  return row ? mapMessageRow(row) : null;
+}
+
+export async function updateMessageContent(db, userId, id, content) {
+  await ensureSchema(db);
+  await db
+    .prepare("UPDATE messages SET content = ? WHERE id = ? AND user_id = ?")
+    .bind(content, id, userId)
+    .run();
+  return getMessageById(db, userId, id);
+}
+
+export async function deleteMessagesFromId(db, userId, conversationId, fromId) {
+  await ensureSchema(db);
+  await db
+    .prepare("DELETE FROM messages WHERE user_id = ? AND conversation_id = ? AND id >= ?")
+    .bind(userId, conversationId, fromId)
+    .run();
+}
+
 export async function clearUserConversationMessages(db, userId, conversationId) {
   await ensureSchema(db);
   if (conversationId) {
