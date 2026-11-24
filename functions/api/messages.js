@@ -1,13 +1,10 @@
 import { jsonResponse, requireAuthenticatedUser } from "../_lib/auth.js";
-import { loadConfig, MAX_INPUT_CHARS } from "../_lib/config.js";
+import { loadConfig } from "../_lib/config.js";
 import {
   clearUserConversationMessages,
-  deleteMessagesFromId,
   getConversation,
-  getMessageById,
   listConversationMessages,
   listUserConversations,
-  updateMessageContent,
 } from "../_lib/db.js";
 
 export async function onRequestGet({ request, env }) {
@@ -40,47 +37,6 @@ export async function onRequestGet({ request, env }) {
   return jsonResponse({ conversation_id: convId, messages });
 }
 
-export async function onRequestPatch({ request, env }) {
-  const config = loadConfig(env);
-  if (!config.hasDb) {
-    return jsonResponse({ detail: "服务尚未绑定数据库。" }, 503);
-  }
-  const user = await requireAuthenticatedUser(request, config, env.DB);
-  if (!user) {
-    return jsonResponse({ detail: "未登录或登录已过期。" }, 401);
-  }
-
-  let body = {};
-  try {
-    body = await request.json();
-  } catch {
-    return jsonResponse({ detail: "请求格式错误。" }, 400);
-  }
-
-  const msgId = Number(body.message_id);
-  const content = typeof body.content === "string" ? body.content.trim() : "";
-  if (!Number.isInteger(msgId) || msgId <= 0) {
-    return jsonResponse({ detail: "无效的消息 ID。" }, 400);
-  }
-  if (!content) {
-    return jsonResponse({ detail: "消息内容不能为空。" }, 400);
-  }
-  if (content.length > MAX_INPUT_CHARS) {
-    return jsonResponse({ detail: `消息内容不能超过 ${MAX_INPUT_CHARS} 个字符。` }, 400);
-  }
-
-  const target = await getMessageById(env.DB, user.userId, msgId);
-  if (!target) {
-    return jsonResponse({ detail: "未找到该消息。" }, 404);
-  }
-  if (target.role !== "assistant") {
-    return jsonResponse({ detail: "仅支持直接修改 AI 回复消息。" }, 400);
-  }
-
-  const updated = await updateMessageContent(env.DB, user.userId, msgId, content);
-  return jsonResponse({ message: updated });
-}
-
 export async function onRequestDelete({ request, env }) {
   const config = loadConfig(env);
   if (!config.hasDb) {
@@ -93,25 +49,6 @@ export async function onRequestDelete({ request, env }) {
 
   const url = new URL(request.url);
   const convId = String(url.searchParams.get("conversation_id") || "").trim();
-  const fromIdRaw = url.searchParams.get("from_id");
-
-  if (fromIdRaw !== null && fromIdRaw !== "") {
-    const fromId = Number(fromIdRaw);
-    if (!convId || !Number.isInteger(fromId) || fromId <= 0) {
-      return jsonResponse({ detail: "回溯删除参数无效。" }, 400);
-    }
-    const conv = await getConversation(env.DB, user.userId, convId);
-    if (!conv) {
-      return jsonResponse({ detail: "未找到该对话。" }, 404);
-    }
-    const target = await getMessageById(env.DB, user.userId, fromId);
-    if (!target || target.conversation_id !== convId) {
-      return jsonResponse({ detail: "未找到目标消息。" }, 404);
-    }
-    await deleteMessagesFromId(env.DB, user.userId, convId, fromId);
-    return jsonResponse({ ok: true, deleted_from_id: fromId });
-  }
-
   if (convId) {
     const conv = await getConversation(env.DB, user.userId, convId);
     if (!conv) {

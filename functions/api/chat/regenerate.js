@@ -1,6 +1,6 @@
 import { jsonResponse, requireAuthenticatedUser } from "../../_lib/auth.js";
 import { loadConfig } from "../../_lib/config.js";
-import { checkRateLimit, deleteMessageById, getConversation, getLastMessage } from "../../_lib/db.js";
+import { deleteMessageById, getConversation, getLastMessage } from "../../_lib/db.js";
 import { createChatSseResponse } from "../../_lib/sse.js";
 
 export async function onRequestPost({ request, env }) {
@@ -11,15 +11,6 @@ export async function onRequestPost({ request, env }) {
   const user = await requireAuthenticatedUser(request, config, env.DB);
   if (!user) {
     return jsonResponse({ detail: "未登录或登录已过期。" }, 401);
-  }
-
-  const limit = await checkRateLimit(env.DB, `chat:${user.userId}`, 20, 60);
-  if (!limit.allowed) {
-    return jsonResponse(
-      { detail: `⏳ 请求过于频繁，请在 ${limit.retryAfter} 秒后再试。` },
-      429,
-      { "Retry-After": String(limit.retryAfter) },
-    );
   }
 
   let conversationId = "";
