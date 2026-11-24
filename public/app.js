@@ -1183,6 +1183,15 @@
   newChatBtn.addEventListener("click", handleNewChat);
   drawerNewChatBtn.addEventListener("click", handleNewChat);
 
+  const PERSONA_TEMPLATES = {
+    humor:
+      "你是一群好朋友群里的幽默搭子。说话接地气、机智风趣、偶尔温和地接梗吐槽，但关键时刻回答靠谱实用；不要官腔，用简洁自然的中文聊天。",
+    gentle:
+      "你是一位温柔、细腻、共情力很强的倾听者与生活伙伴。先接住用户的情绪再给出温暖实在的建议，语气松弛自然、不居高临下。",
+    concise:
+      "你是一位极简高效的日常百科助手。直接给核心结论与要点，不寒暄不铺垫，复杂问题分点说清。",
+  };
+
   function updateUserPersonaStatus(isCustom) {
     userPersonaStatus.textContent = isCustom
       ? "当前生效：我的自定义人设（仅自己账号生效）"
@@ -1207,6 +1216,7 @@
       const data = await res.json();
       userPersonaInput.value = data.custom_persona || "";
       updateUserPersonaStatus(Boolean(data.is_custom));
+      userPersonaInput.focus();
     } catch (_) {
       showAdminMsg(userPersonaMsg, "读取个人人设时网络异常。", false);
     }
@@ -1314,17 +1324,11 @@
       adminTabModels.classList.toggle("hidden", target !== "models");
       adminTabPersona.classList.toggle("hidden", target !== "persona");
       adminTabUsers.classList.toggle("hidden", target !== "users");
+      if (target === "persona" && admSystemPrompt) {
+        admSystemPrompt.focus();
+      }
     });
   });
-
-  const PERSONA_TEMPLATES = {
-    humor:
-      "你是一群好朋友群里的幽默搭子。说话接地气、机智风趣、偶尔温和地接梗吐槽，但关键时刻回答靠谱实用；不要官腔，用简洁自然的中文聊天。",
-    gentle:
-      "你是一位温柔、细腻、共情力很强的倾听者与生活伙伴。先接住用户的情绪再给出温暖实在的建议，语气松弛自然、不居高临下。",
-    concise:
-      "你是一位极简高效的日常百科助手。直接给核心结论与要点，不寒暄不铺垫，复杂问题分点说清。",
-  };
 
   personaChips.forEach(function (chip) {
     chip.addEventListener("click", function () {
