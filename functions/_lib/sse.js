@@ -8,7 +8,7 @@ import {
   DEFAULT_SYSTEM_PROMPT,
   MAX_OUTPUT_TOKENS,
 } from "./config.js";
-import { getRecentMessages, insertMessage, resolveRuntimeSettings } from "./db.js";
+import { getRecentMessages, getUserPersona, insertMessage, resolveRuntimeSettings } from "./db.js";
 
 /**
  * 构造发送给 OpenAI 兼容端点的 messages 列表：
@@ -135,6 +135,9 @@ export function createChatSseResponse({
           return;
         }
 
+        const userPersona = await getUserPersona(db, userId);
+        const effectiveSystemPrompt = userPersona || runtime.systemPrompt;
+
         const recentRows = await getRecentMessages(
           db,
           userId,
@@ -144,7 +147,7 @@ export function createChatSseResponse({
         const apiMessages = buildApiMessages(
           recentRows,
           DEFAULT_CONTEXT_TURNS,
-          runtime.systemPrompt,
+          effectiveSystemPrompt,
         );
 
         const requestUpstream = async (targetModel, targetBaseUrl, targetApiKey) => {

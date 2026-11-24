@@ -19,6 +19,7 @@ import {
   listUserConversations,
   resolveRuntimeSettings,
   setAppSetting,
+  setUserPersona,
   upsertManagedUser,
 } from "../functions/_lib/db.js";
 
@@ -28,6 +29,7 @@ function createMockD1() {
   const messages = [];
   const appSettings = new Map();
   const managedUsers = new Map();
+  const userPreferences = new Map();
   let autoId = 1;
 
   return {
@@ -132,6 +134,15 @@ function createMockD1() {
             managedUsers.delete(params[0]);
             return { success: true };
           }
+          if (sql.startsWith("INSERT INTO user_preferences")) {
+            const [user_id, system_prompt, updated_at] = params;
+            userPreferences.set(user_id, { user_id, system_prompt, updated_at });
+            return { success: true };
+          }
+          if (sql.startsWith("DELETE FROM user_preferences")) {
+            userPreferences.delete(params[0]);
+            return { success: true };
+          }
           throw new Error(`Unhandled SQL run: ${sql}`);
         },
         async all() {
@@ -190,6 +201,9 @@ function createMockD1() {
               .filter((m) => m.user_id === userId && m.conversation_id === convId)
               .sort((a, b) => b.id - a.id);
             return list[0] || null;
+          }
+          if (sql.includes("FROM user_preferences WHERE user_id = ?")) {
+            return userPreferences.get(params[0]) || null;
           }
           return null;
         },
@@ -338,6 +352,53 @@ test("admin switching between DeepSeek V4.1 Flash and Gemini 4 persists in D1", 
   assert.equal(requestedModel, "deepseek-flash");
   assert.equal(requestedSystem, "你是一只傲娇但很靠谱的电子小猫。");
   assert.match(sseText, /DeepSeek回复/);
+
+  // 若用户自定义了个人人设，优先使用个人人设；清除后自动回退到管理员人设
+  await setUserPersona(db, "admin", "我是用户专属的赛博管家。");
+  const resUserPersona = createChatSseResponse({
+    db,
+    config,
+    userId: "admin",
+    conversationId: conv.id,
+    fetchImpl: async (_, init) => {
+      requestedSystem = JSON.parse(init.body).messages[0]?.content || "";
+      return new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"OK"}}]}\n\n'));
+            c.enqueue(encoder.encode("data: [DONE]\n\n"));
+            c.close();
+          },
+        }),
+        { status: 200 },
+      );
+    },
+  });
+  await resUserPersona.text();
+  assert.equal(requestedSystem, "我是用户专属的赛博管家。");
+
+  await setUserPersona(db, "admin", "");
+  const resFallbackAdmin = createChatSseResponse({
+    db,
+    config,
+    userId: "admin",
+    conversationId: conv.id,
+    fetchImpl: async (_, init) => {
+      requestedSystem = JSON.parse(init.body).messages[0]?.content || "";
+      return new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"OK"}}]}\n\n'));
+            c.enqueue(encoder.encode("data: [DONE]\n\n"));
+            c.close();
+          },
+        }),
+        { status: 200 },
+      );
+    },
+  });
+  await resFallbackAdmin.text();
+  assert.equal(requestedSystem, "你是一只傲娇但很靠谱的电子小猫。");
 });
 
 test("buildApiMessages sliding window and single-turn image strategy", () => {

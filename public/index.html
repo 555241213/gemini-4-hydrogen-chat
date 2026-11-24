@@ -67,6 +67,11 @@
             <line x1="5" y1="12" x2="19" y2="12"></line>
           </svg>
         </button>
+        <button type="button" id="persona-btn" class="icon-btn" title="我的 AI 人设" aria-label="我的 AI 人设">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8L12 2z"></path>
+          </svg>
+        </button>
         <button type="button" id="theme-toggle-btn" class="icon-btn" title="切换浅色/深色模式" aria-label="切换主题">
           <span id="theme-icon">☀️</span>
         </button>
@@ -177,6 +182,42 @@
       </button>
       <div id="conversations-list" class="conversations-list"></div>
     </aside>
+  </div>
+
+  <!-- 用户个人 AI 人设弹窗 -->
+  <div id="persona-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="user-persona-title">
+    <div class="glass-card admin-card" style="max-width: 520px;">
+      <div class="admin-header">
+        <div>
+          <h2 id="user-persona-title" class="admin-title">✦ 我的 AI 人设</h2>
+          <p id="user-persona-status" class="admin-subtitle">当前状态：沿用站点默认人设</p>
+        </div>
+        <button type="button" id="user-persona-close-btn" class="icon-btn" aria-label="关闭">×</button>
+      </div>
+
+      <div class="admin-panel">
+        <div class="persona-chips">
+          <button type="button" class="glass-action-btn user-persona-chip" data-persona="humor">幽默损友搭子</button>
+          <button type="button" class="glass-action-btn user-persona-chip" data-persona="gentle">温柔倾听治愈</button>
+          <button type="button" class="glass-action-btn user-persona-chip" data-persona="concise">极简百科直答</button>
+        </div>
+        <div class="field-group">
+          <label for="user-persona-input">自定义人设（留空保存即自动使用管理员设定的人设）</label>
+          <textarea
+            id="user-persona-input"
+            class="glass-textarea"
+            rows="6"
+            maxlength="4000"
+            placeholder="留空则使用管理员设定的默认人设；填入后仅对你自己的账号生效（最多 4,000 字）..."
+          ></textarea>
+        </div>
+        <div id="user-persona-msg" class="admin-msg hidden"></div>
+        <div class="admin-footer">
+          <button type="button" id="user-persona-clear-btn" class="glass-action-btn admin-btn-lg">用回默认人设</button>
+          <button type="button" id="user-persona-save-btn" class="primary-btn admin-save-btn">保存我的人设</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- 管理员后台弹窗（仅管理员可见） -->

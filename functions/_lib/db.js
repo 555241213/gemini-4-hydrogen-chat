@@ -82,6 +82,16 @@ export async function ensureSchema(db) {
           ")",
         )
         .run();
+
+      await db
+        .prepare(
+          "CREATE TABLE IF NOT EXISTS user_preferences (" +
+            "user_id TEXT PRIMARY KEY, " +
+            "system_prompt TEXT NOT NULL, " +
+            "updated_at INTEGER NOT NULL" +
+          ")",
+        )
+        .run();
     })().catch((err) => {
       schemaInitPromise = null;
       throw err;
@@ -434,4 +444,33 @@ export async function getUserMessageStats(db) {
     stats[row.user_id] = Number(row.msg_count || 0);
   }
   return stats;
+}
+
+export async function getUserPersona(db, userId) {
+  await ensureSchema(db);
+  const row = await db
+    .prepare("SELECT system_prompt FROM user_preferences WHERE user_id = ?")
+    .bind(userId)
+    .first();
+  return row && typeof row.system_prompt === "string" && row.system_prompt.trim()
+    ? row.system_prompt.trim()
+    : "";
+}
+
+export async function setUserPersona(db, userId, systemPrompt) {
+  await ensureSchema(db);
+  const cleaned = String(systemPrompt || "").trim();
+  if (!cleaned) {
+    await db.prepare("DELETE FROM user_preferences WHERE user_id = ?").bind(userId).run();
+    return "";
+  }
+  const now = Math.floor(Date.now() / 1000);
+  await db
+    .prepare(
+      "INSERT INTO user_preferences (user_id, system_prompt, updated_at) VALUES (?, ?, ?) " +
+        "ON CONFLICT(user_id) DO UPDATE SET system_prompt = excluded.system_prompt, updated_at = excluded.updated_at",
+    )
+    .bind(userId, cleaned, now)
+    .run();
+  return cleaned;
 }

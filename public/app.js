@@ -38,6 +38,7 @@
   const historyDrawerBtn = document.getElementById("history-drawer-btn");
   const navUserPill = document.getElementById("nav-user-pill");
   const newChatBtn = document.getElementById("new-chat-btn");
+  const personaBtn = document.getElementById("persona-btn");
   const themeToggleBtn = document.getElementById("theme-toggle-btn");
   const themeIcon = document.getElementById("theme-icon");
   const clearBtn = document.getElementById("clear-btn");
@@ -102,6 +103,16 @@
   const admNewUid = document.getElementById("adm-new-uid");
   const admNewPwd = document.getElementById("adm-new-pwd");
   const admUserMsg = document.getElementById("adm-user-msg");
+
+  // 用户个人人设弹窗
+  const personaModal = document.getElementById("persona-modal");
+  const userPersonaCloseBtn = document.getElementById("user-persona-close-btn");
+  const userPersonaStatus = document.getElementById("user-persona-status");
+  const userPersonaInput = document.getElementById("user-persona-input");
+  const userPersonaMsg = document.getElementById("user-persona-msg");
+  const userPersonaClearBtn = document.getElementById("user-persona-clear-btn");
+  const userPersonaSaveBtn = document.getElementById("user-persona-save-btn");
+  const userPersonaChips = personaModal.querySelectorAll(".user-persona-chip");
 
   // 确认与图片放大弹窗
   const confirmModal = document.getElementById("confirm-modal");
@@ -170,6 +181,7 @@
     authView.classList.remove("hidden");
     appView.classList.add("hidden");
     drawerBackdrop.classList.add("hidden");
+    personaModal.classList.add("hidden");
     adminModal.classList.add("hidden");
     if (!state.configured) {
       const missingText = state.missingConfig.length
@@ -201,6 +213,7 @@
     historyDrawerBtn.disabled = busy;
     newChatBtn.disabled = busy;
     drawerNewChatBtn.disabled = busy;
+    personaBtn.disabled = busy;
     themeToggleBtn.disabled = busy;
     clearBtn.disabled = busy || state.messages.length === 0;
     adminBtn.disabled = busy;
@@ -1163,6 +1176,90 @@
 
   newChatBtn.addEventListener("click", handleNewChat);
   drawerNewChatBtn.addEventListener("click", handleNewChat);
+
+  function updateUserPersonaStatus(isCustom) {
+    userPersonaStatus.textContent = isCustom
+      ? "当前生效：我的自定义人设（仅自己账号生效）"
+      : "当前生效：沿用管理员设定的人设";
+  }
+
+  async function openUserPersonaModal() {
+    if (state.isStreaming) return;
+    userPersonaMsg.classList.add("hidden");
+    personaModal.classList.remove("hidden");
+    try {
+      const res = await fetch("/api/persona");
+      if (res.status === 401) {
+        state.user = null;
+        showAuthView();
+        return;
+      }
+      if (!res.ok) {
+        showAdminMsg(userPersonaMsg, "读取个人人设失败。", false);
+        return;
+      }
+      const data = await res.json();
+      userPersonaInput.value = data.custom_persona || "";
+      updateUserPersonaStatus(Boolean(data.is_custom));
+    } catch (_) {
+      showAdminMsg(userPersonaMsg, "读取个人人设时网络异常。", false);
+    }
+  }
+
+  async function saveUserPersona(promptText, successTip) {
+    userPersonaSaveBtn.disabled = true;
+    userPersonaClearBtn.disabled = true;
+    try {
+      const res = await fetch("/api/persona", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ system_prompt: promptText }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showAdminMsg(userPersonaMsg, data.detail || "保存失败。", false);
+        return;
+      }
+      userPersonaInput.value = data.custom_persona || "";
+      updateUserPersonaStatus(Boolean(data.is_custom));
+      showAdminMsg(userPersonaMsg, successTip, true);
+    } catch (_) {
+      showAdminMsg(userPersonaMsg, "保存失败，请检查网络。", false);
+    } finally {
+      userPersonaSaveBtn.disabled = false;
+      userPersonaClearBtn.disabled = false;
+    }
+  }
+
+  personaBtn.addEventListener("click", openUserPersonaModal);
+  userPersonaCloseBtn.addEventListener("click", function () {
+    personaModal.classList.add("hidden");
+  });
+  personaModal.addEventListener("click", function (evt) {
+    if (evt.target === personaModal) personaModal.classList.add("hidden");
+  });
+
+  userPersonaChips.forEach(function (chip) {
+    chip.addEventListener("click", function () {
+      const key = chip.dataset.persona;
+      if (PERSONA_TEMPLATES[key]) {
+        userPersonaInput.value = PERSONA_TEMPLATES[key];
+        userPersonaInput.focus();
+      }
+    });
+  });
+
+  userPersonaClearBtn.addEventListener("click", function () {
+    saveUserPersona("", "已清除自定义人设，接下来将使用管理员设定的人设！");
+  });
+
+  userPersonaSaveBtn.addEventListener("click", function () {
+    const val = userPersonaInput.value.trim();
+    const tip = val
+      ? "你的人设已保存，下一条消息立即生效！"
+      : "已清空自定义人设，接下来将使用管理员设定的人设！";
+    saveUserPersona(val, tip);
+  });
 
   themeToggleBtn.addEventListener("click", function () {
     const current = document.documentElement.getAttribute("data-theme");
