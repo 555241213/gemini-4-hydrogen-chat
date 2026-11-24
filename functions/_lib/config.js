@@ -4,6 +4,7 @@
 
 export const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
 export const DEFAULT_MODEL_NAME = "gemini-4-hydrogen";
+export const DEFAULT_FALLBACK_MODEL = "gemini-3.8-flash";
 export const DEFAULT_REASONING_EFFORT = "low";
 
 export const DEFAULT_SYSTEM_PROMPT =
@@ -84,6 +85,15 @@ export function loadConfig(env = {}) {
   const modelName = String(env.MODEL_NAME || "").trim() || DEFAULT_MODEL_NAME;
   const sessionSecret = String(env.SESSION_SECRET || "").trim();
 
+  // 高峰期 503 备选模型：默认当主模型为 gemini-4-hydrogen 时回退到 gemini-3.8-flash；显式设为空字符串可关闭
+  let fallbackModel = modelName === DEFAULT_MODEL_NAME ? DEFAULT_FALLBACK_MODEL : "";
+  if (Object.prototype.hasOwnProperty.call(env, "FALLBACK_MODEL") && env.FALLBACK_MODEL !== undefined) {
+    fallbackModel = String(env.FALLBACK_MODEL).trim();
+  }
+  if (fallbackModel === modelName) {
+    fallbackModel = "";
+  }
+
   // 思考深度控制：未配置默认 "low"；显式置空或误配 "none" 时请求不传该参数
   let reasoningEffort = DEFAULT_REASONING_EFFORT;
   if (Object.prototype.hasOwnProperty.call(env, "REASONING_EFFORT") && env.REASONING_EFFORT !== undefined) {
@@ -102,6 +112,7 @@ export function loadConfig(env = {}) {
     userEntries,
     baseUrl,
     modelName,
+    fallbackModel,
     reasoningEffort,
     sessionSecret,
     hasDb: Boolean(env.DB),

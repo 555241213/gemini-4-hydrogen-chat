@@ -217,6 +217,31 @@ test("D1 isolation and SSE streaming persistence on success vs error", async () 
   assert.match(errText, /event: error/);
   assert.equal((await listUserMessages(db, "小明")).length, 2);
 
+  // 503 高峰期自动重试并回退到 gemini-3.8-flash
+  const calledModels = [];
+  const fallbackFetch = async (_, init) => {
+    const body = JSON.parse(init.body);
+    calledModels.push(body.model);
+    if (body.model === "gemini-4-hydrogen") {
+      return new Response(JSON.stringify({ error: { message: "high demand" } }), { status: 503 });
+    }
+    return new Response(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"备选回复"}}]}\n\n'));
+          c.enqueue(encoder.encode("data: [DONE]\n\n"));
+          c.close();
+        },
+      }),
+      { status: 200 },
+    );
+  };
+  const fbRes = createChatSseResponse({ db, config, userId: "小明", fetchImpl: fallbackFetch });
+  const fbText = await fbRes.text();
+  assert.match(fbText, /event: done/);
+  assert.deepEqual(calledModels, ["gemini-4-hydrogen", "gemini-4-hydrogen", "gemini-3.8-flash"]);
+  assert.equal((await listUserMessages(db, "小明")).length, 3);
+
   await clearUserMessages(db, "小明");
   assert.equal((await listUserMessages(db, "小明")).length, 0);
   assert.equal((await listUserMessages(db, "小红")).length, 1);

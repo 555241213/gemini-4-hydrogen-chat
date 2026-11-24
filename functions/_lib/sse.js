@@ -124,25 +124,38 @@ export function createChatSseResponse({
         const recentRows = await getRecentMessages(db, userId, DEFAULT_CONTEXT_TURNS * 2);
         const apiMessages = buildApiMessages(recentRows);
 
-        const requestBody = {
-          model: config.modelName,
-          messages: apiMessages,
-          max_tokens: MAX_OUTPUT_TOKENS,
-          stream: true,
-        };
-        if (config.reasoningEffort !== null) {
-          requestBody.reasoning_effort = config.reasoningEffort;
-        }
+        const requestUpstream = async (targetModel) => {
+          const requestBody = {
+            model: targetModel,
+            messages: apiMessages,
+            max_tokens: MAX_OUTPUT_TOKENS,
+            stream: true,
+          };
+          if (config.reasoningEffort !== null) {
+            requestBody.reasoning_effort = config.reasoningEffort;
+          }
 
-        const upstreamRes = await fetchImpl(`${config.baseUrl}chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${config.apiKey}`,
-          },
-          body: JSON.stringify(requestBody),
-          signal: AbortSignal.timeout(API_TIMEOUT_MS),
-        });
+          return fetchImpl(`${config.baseUrl}chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${config.apiKey}`,
+            },
+            body: JSON.stringify(requestBody),
+            signal: AbortSignal.timeout(API_TIMEOUT_MS),
+          });
+        };
+
+        let upstreamRes = await requestUpstream(config.modelName);
+
+        // 仅在 503（未计费且明确为临时高峰拥堵）时短等重试一次；若仍 503 则无缝切换备选模型
+        if (upstreamRes.status === 503) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          upstreamRes = await requestUpstream(config.modelName);
+          if (upstreamRes.status === 503 && config.fallbackModel) {
+            upstreamRes = await requestUpstream(config.fallbackModel);
+          }
+        }
 
         if (!upstreamRes.ok || !upstreamRes.body) {
           const rawErr = await upstreamRes.text().catch(() => "");
