@@ -18,7 +18,11 @@ export const DEFAULT_SYSTEM_PROMPT =
 
 export const MAX_INPUT_CHARS = 12000;
 export const MAX_OUTPUT_TOKENS = 4096;
+export const MIN_OUTPUT_TOKENS = 256;
+export const MAX_OUTPUT_TOKENS_LIMIT = 32768;
 export const DEFAULT_CONTEXT_TURNS = 6;
+export const MIN_CONTEXT_TURNS = 1;
+export const MAX_CONTEXT_TURNS = 50;
 export const API_TIMEOUT_MS = 60000;
 export const MAX_IMAGE_DATA_URL_LEN = 900000;
 export const SESSION_TTL_SECONDS = 30 * 24 * 3600;

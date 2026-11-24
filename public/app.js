@@ -88,6 +88,8 @@
   const admBaseUrl = document.getElementById("adm-base-url");
   const admEffort = document.getElementById("adm-effort");
   const admFallback = document.getElementById("adm-fallback");
+  const admContextTurns = document.getElementById("adm-context-turns");
+  const admMaxTokens = document.getElementById("adm-max-tokens");
   const admDeepseekKey = document.getElementById("adm-deepseek-key");
   const admGeminiKey = document.getElementById("adm-gemini-key");
   const admCustomKey = document.getElementById("adm-custom-key");
@@ -1134,6 +1136,8 @@
     admBaseUrl.value = s.base_url || "";
     admEffort.value = s.reasoning_effort || "low";
     admFallback.value = s.fallback_model || "";
+    admContextTurns.value = String(s.context_turns || 6);
+    admMaxTokens.value = String(s.max_output_tokens || 4096);
 
     admDeepseekKey.value = "";
     admGeminiKey.value = "";
@@ -1248,6 +1252,8 @@
       base_url: admBaseUrl.value.trim(),
       reasoning_effort: admEffort.value,
       fallback_model: admFallback.value.trim(),
+      context_turns: Number(admContextTurns.value || 6),
+      max_output_tokens: Number(admMaxTokens.value || 4096),
       deepseek_api_key: admDeepseekKey.value.trim(),
       gemini_api_key: admGeminiKey.value.trim(),
       custom_api_key: admCustomKey.value.trim(),

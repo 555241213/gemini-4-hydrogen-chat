@@ -6,7 +6,17 @@
  * - managed_users：管理员在线增删/改密的成员列表（与环境变量 USER_PASSWORDS 合并）
  */
 
-import { DEFAULT_FALLBACK_MODEL, DEFAULT_SYSTEM_PROMPT, normalizeBaseUrl } from "./config.js";
+import {
+  DEFAULT_CONTEXT_TURNS,
+  DEFAULT_FALLBACK_MODEL,
+  DEFAULT_SYSTEM_PROMPT,
+  MAX_CONTEXT_TURNS,
+  MAX_OUTPUT_TOKENS,
+  MAX_OUTPUT_TOKENS_LIMIT,
+  MIN_CONTEXT_TURNS,
+  MIN_OUTPUT_TOKENS,
+  normalizeBaseUrl,
+} from "./config.js";
 
 let schemaInitPromise = null;
 
@@ -417,6 +427,22 @@ export async function resolveRuntimeSettings(db, config) {
 
   const systemPrompt = String(stored.system_prompt || "").trim() || DEFAULT_SYSTEM_PROMPT;
 
+  const parsedTurns = Number.parseInt(String(stored.context_turns || ""), 10);
+  const contextTurns =
+    Number.isInteger(parsedTurns) &&
+    parsedTurns >= MIN_CONTEXT_TURNS &&
+    parsedTurns <= MAX_CONTEXT_TURNS
+      ? parsedTurns
+      : DEFAULT_CONTEXT_TURNS;
+
+  const parsedMaxTokens = Number.parseInt(String(stored.max_output_tokens || ""), 10);
+  const maxOutputTokens =
+    Number.isInteger(parsedMaxTokens) &&
+    parsedMaxTokens >= MIN_OUTPUT_TOKENS &&
+    parsedMaxTokens <= MAX_OUTPUT_TOKENS_LIMIT
+      ? parsedMaxTokens
+      : MAX_OUTPUT_TOKENS;
+
   return {
     provider,
     modelName,
@@ -430,6 +456,8 @@ export async function resolveRuntimeSettings(db, config) {
     reasoningEffort,
     fallbackModel,
     systemPrompt,
+    contextTurns,
+    maxOutputTokens,
   };
 }
 

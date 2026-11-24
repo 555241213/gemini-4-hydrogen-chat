@@ -2,6 +2,10 @@ import { jsonResponse, requireAdminUser } from "../../_lib/auth.js";
 import {
   DEFAULT_SYSTEM_PROMPT,
   loadConfig,
+  MAX_CONTEXT_TURNS,
+  MAX_OUTPUT_TOKENS_LIMIT,
+  MIN_CONTEXT_TURNS,
+  MIN_OUTPUT_TOKENS,
   MODEL_PRESETS,
   normalizeBaseUrl,
 } from "../../_lib/config.js";
@@ -25,6 +29,8 @@ function serializeSettings(runtime) {
     reasoning_effort: runtime.reasoningEffort === null ? "none" : runtime.reasoningEffort,
     system_prompt: runtime.systemPrompt,
     default_system_prompt: DEFAULT_SYSTEM_PROMPT,
+    context_turns: runtime.contextTurns,
+    max_output_tokens: runtime.maxOutputTokens,
     has_gemini_key: Boolean(runtime.geminiApiKey),
     gemini_key_masked: maskSecret(runtime.geminiApiKey),
     has_deepseek_key: Boolean(runtime.deepseekApiKey),
@@ -60,9 +66,40 @@ export async function onRequestPost({ request, env }) {
 
   const hasPersonaUpdate = Object.prototype.hasOwnProperty.call(body, "system_prompt");
   const hasModelUpdate = Object.prototype.hasOwnProperty.call(body, "provider");
+  const hasContextUpdate =
+    Object.prototype.hasOwnProperty.call(body, "context_turns") ||
+    Object.prototype.hasOwnProperty.call(body, "max_output_tokens");
 
-  if (!hasPersonaUpdate && !hasModelUpdate) {
+  if (!hasPersonaUpdate && !hasModelUpdate && !hasContextUpdate) {
     return jsonResponse({ detail: "未包含任何可更新的配置项。" }, 400);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "context_turns")) {
+    const turns = Number(body.context_turns);
+    if (!Number.isInteger(turns) || turns < MIN_CONTEXT_TURNS || turns > MAX_CONTEXT_TURNS) {
+      return jsonResponse(
+        { detail: `上下文记忆轮数须为 ${MIN_CONTEXT_TURNS} 到 ${MAX_CONTEXT_TURNS} 之间的整数。` },
+        400,
+      );
+    }
+    await setAppSetting(env.DB, "context_turns", turns);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "max_output_tokens")) {
+    const tokens = Number(body.max_output_tokens);
+    if (
+      !Number.isInteger(tokens) ||
+      tokens < MIN_OUTPUT_TOKENS ||
+      tokens > MAX_OUTPUT_TOKENS_LIMIT
+    ) {
+      return jsonResponse(
+        {
+          detail: `最大输出 Tokens 须为 ${MIN_OUTPUT_TOKENS} 到 ${MAX_OUTPUT_TOKENS_LIMIT} 之间的整数。`,
+        },
+        400,
+      );
+    }
+    await setAppSetting(env.DB, "max_output_tokens", tokens);
   }
 
   if (hasPersonaUpdate) {

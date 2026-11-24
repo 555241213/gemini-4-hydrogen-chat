@@ -137,16 +137,18 @@ export function createChatSseResponse({
 
         const userPersona = await getUserPersona(db, userId);
         const effectiveSystemPrompt = userPersona || runtime.systemPrompt;
+        const contextTurns = runtime.contextTurns || DEFAULT_CONTEXT_TURNS;
+        const maxOutputTokens = runtime.maxOutputTokens || MAX_OUTPUT_TOKENS;
 
         const recentRows = await getRecentMessages(
           db,
           userId,
           conversationId,
-          DEFAULT_CONTEXT_TURNS * 2,
+          contextTurns * 2,
         );
         const apiMessages = buildApiMessages(
           recentRows,
-          DEFAULT_CONTEXT_TURNS,
+          contextTurns,
           effectiveSystemPrompt,
         );
 
@@ -154,7 +156,7 @@ export function createChatSseResponse({
           const requestBody = {
             model: targetModel,
             messages: apiMessages,
-            max_tokens: MAX_OUTPUT_TOKENS,
+            max_tokens: maxOutputTokens,
             stream: true,
           };
           if (runtime.reasoningEffort !== null) {
