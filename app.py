@@ -1,25 +1,16 @@
 """
-Gemini 4 Hydrogen 小圈子轻量级 AI 对话应用（Streamlit + OpenAI 兼容端点）
+星芒 AI · 小圈子日常聊天应用（Streamlit + Gemini OpenAI 兼容端点）
 
-视觉与交互规范：「深邃毛玻璃风」
-- 默认深色模式（#090C14 + 靛蓝/青蓝低饱和径向光晕），支持顶部一键切换浅色/深色模式。
-- 56px 顶部固定毛玻璃导航栏：极简星芒 Logo、标题、模型选择胶囊、明暗切换与清空对话按钮。
-- 768px 居中对话区：空状态展示欢迎语 + 4 张毛玻璃快捷提问卡片。
-- 用户消息右对齐半透明靛蓝圆角气泡；AI 回复去边框文档流左对齐，悬停平滑显示「复制」「重新生成」。
-- #141720 深色圆角代码块卡片，带顶部语言标签与一键复制成功反馈。
-- 底部悬浮圆角胶囊输入框 + 向上翻看历史时停止自动滚底并浮现圆形毛玻璃「回到底部」按钮。
-
-安全与成本控制：
-- 零硬编码密钥；兼容环境变量与 Streamlit Secrets；登录门禁 + hmac 常量时间比对 + 防爆破延迟。
-- 滑动窗口截断（2–12 轮，默认 6 轮）、单轮传图压缩（<=1024px JPEG 80）、输入 12,000 字/输出 4,096 token 上限。
+定位：面向 10 人以内小圈子的极简日常聊天工具
+- 去除侧边栏、Token 统计、System Prompt 配置、模型切换与思考过程折叠等技术面板，只保留纯粹的日常对话与发图识图。
+- 延续「深邃毛玻璃风」视觉：默认深墨蓝黑（#090C14）+ 低饱和靛蓝/青蓝光晕，支持顶部一键切换浅色/深色。
+- 后台静默保留安全与成本防线：登录门禁、最近 6 轮滑动窗口、单轮传图压缩（<=1024px JPEG 80）、输入 12,000 字 / 输出 4,096 token 上限。
 """
 
 from __future__ import annotations
 
 import base64
-from datetime import datetime
 import hmac
-import html
 import io
 import os
 import time
@@ -41,68 +32,47 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 # ==============================================================================
-# 全局常量配置
+# 全局常量配置（后台静默控制成本与稳定性）
 # ==============================================================================
 
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 DEFAULT_MODEL_NAME = "gemini-4-hydrogen"
 DEFAULT_REASONING_EFFORT = "low"
 
-# 导航栏模型选择胶囊候选项（默认始终优先选中 config["model_name"]）
-AVAILABLE_MODELS: list[str] = [
-    "gemini-4-hydrogen",
-    "gemini-4-argon",
-    "gemini-4-neon",
-]
+DEFAULT_SYSTEM_PROMPT = (
+    "你是一位亲切、自然、乐于助人的日常 AI 助手。"
+    "请用通俗清晰、友好自然的中文回答用户的日常聊天、生活建议、文字润色和图片识别问题。"
+)
 
-# 成本与稳定性兜底阈值
 MAX_INPUT_CHARS = 12000
 MAX_OUTPUT_TOKENS = 4096
 MAX_IMAGE_SIDE = 1024
 JPEG_QUALITY = 80
 API_TIMEOUT_SECONDS = 60.0
 API_MAX_RETRIES = 1
-
-# 滑动窗口轮数配置
-MIN_CONTEXT_TURNS = 2
-MAX_CONTEXT_TURNS = 12
 DEFAULT_CONTEXT_TURNS = 6
 
-# System Prompt 快捷预设（不会写入对话历史，每次请求动态拼接至头部）
-SYSTEM_PRESETS: dict[str, str] = {
-    "默认助手": "你是一位专业、友善、表达清晰简洁的中文 AI 助手。请直接给出准确、有条理的回答。",
-    "翻译润色": (
-        "你是一位精通中英文的专业翻译与文字编辑。请准确传达原意，兼顾地道表达与语境自然度；"
-        "若用户要求润色，请保留核心观点并给出清晰优化后的版本。"
-    ),
-    "代码助手": (
-        "你是一位资深全栈软件工程师。请优先提供简洁、健壮、可直接运行的代码方案，"
-        "并在关键位置附带简明注释，指出潜在边界条件与性能注意事项。"
-    ),
-    "自定义": "",
-}
-
-# 空状态 4 张毛玻璃快捷提问卡片
+# 空状态 4 张日常聊天毛玻璃快捷卡片
 QUICK_PROMPTS: list[dict[str, str]] = [
     {
-        "title": "✦ 深度概念拆解",
-        "desc": "用通俗比喻讲清 Transformer 注意力机制与核心直觉",
-        "prompt": "请用通俗易懂的比喻解释 Transformer 的注意力机制，并举一个贴近日常生活的例子帮助理解。",
+        "title": "🍳 今晚吃点什么",
+        "desc": "告诉我冰箱里还有哪些食材，帮你快速搭配几道家常菜",
+        "prompt": "我平时下班不想花太长时间做饭，请推荐 3 道 15 分钟内能搞定、常见食材就能做的快手家常菜，简单写下做法。",
     },
     {
-        "title": "</> 健壮代码实战",
-        "desc": "生成带并发限制、超时与自动重试的 Python 异步请求模板",
-        "prompt": "请帮我写一段生产可用的 Python 异步批量 HTTP 请求代码，包含并发数限制、超时控制与指数退避重试，并附简明注释。",
+        "title": "✍️ 润色一条消息",
+        "desc": "把想说的话改得更礼貌、自然或高情商，方便直接发给别人",
+        "prompt": "请帮我把这句话润色成更自然礼貌的表达（提供口语友好版和正式得体版各一条）：「不好意思，这件事我这周可能赶不完，得下周初才能给你。」",
     },
     {
-        "title": "✎ 地道中英润色",
-        "desc": "将中文工作沟通句转化为 3 种不同语气的自然英文表达",
-        "prompt": "请把“这个方案目前还有几个细节待确认，我们周三前同步最终版本”翻译并润色为：正式商务、友好同事、简短即时通讯 3 种地道英文版本。",
+        "title": "✈️ 周末轻松出行",
+        "desc": "策划一次不赶时间、适合放松发呆的周末半日或一日游",
+        "prompt": "帮我设计一个轻松不累的周末一日城市漫步计划，包含上午、午饭、下午茶和傍晚安排，重点是节奏慢、氛围好。",
     },
     {
-        "title": "◈ 团队效率方案",
-        "desc": "为 10 人以内小团队设计轻量高效的周报与 AI 协作流",
-        "prompt": "请为一个 10 人以内的小团队设计一套轻量级周报模板与日常 AI 提效工作流，要求简洁好落地、不增加负担。",
+        "title": "💡 讲个有趣知识",
+        "desc": "用大白话聊一个贴近日常、听完会觉得很有意思的冷知识",
+        "prompt": "用通俗有趣的聊天口吻，给我讲一个贴近日常生活的冷知识，不要太学术，3 分钟内能看完。",
     },
 ]
 
@@ -126,16 +96,13 @@ def get_config_value(key: str) -> str | None:
 
 
 def load_config() -> dict[str, Any]:
-    """从环境变量或 Streamlit Secrets 读取全部运行配置，杜绝硬编码敏感信息。"""
+    """从环境变量或 Streamlit Secrets 读取运行配置，杜绝硬编码敏感信息。"""
     api_key = (get_config_value("GEMINI_API_KEY") or "").strip()
     access_password = (get_config_value("ACCESS_PASSWORD") or "").strip()
     base_url = (get_config_value("BASE_URL") or "").strip() or DEFAULT_BASE_URL
     model_name = (get_config_value("MODEL_NAME") or "").strip() or DEFAULT_MODEL_NAME
 
-    # 思考深度控制：
-    # - 未配置时，默认使用 "low"
-    # - 显式置空（如 REASONING_EFFORT=""）时，请求不传该字段，提升切换模型兼容性
-    # - Gemini 4 不支持 "none"，若误配为 "none" 则同样不传该字段
+    # 思考深度控制：默认 "low"，显式置空或误配 "none" 时不传该参数
     raw_effort = get_config_value("REASONING_EFFORT")
     if raw_effort is None:
         reasoning_effort: str | None = DEFAULT_REASONING_EFFORT
@@ -165,32 +132,15 @@ def get_openai_client(api_key: str, base_url: str) -> OpenAI:
     )
 
 
-def get_model_options(default_model: str) -> list[str]:
-    """生成去重后的模型胶囊选项列表，始终将默认模型放在首位。"""
-    options: list[str] = [default_model]
-    for model in AVAILABLE_MODELS:
-        if model not in options:
-            options.append(model)
-    return options
-
-
-def init_session_state(default_model: str) -> None:
+def init_session_state() -> None:
     """初始化会话级状态变量。"""
     defaults: dict[str, Any] = {
         "authenticated": False,
-        "theme_mode": "dark",  # 默认深色模式，支持顶部一键切换 dark / light
-        "selected_model": default_model,
+        "theme_mode": "dark",
         "messages": [],
         "is_generating": False,
         "pending_generation": False,
         "last_error": None,
-        "context_turns": DEFAULT_CONTEXT_TURNS,
-        "system_preset": "默认助手",
-        "system_prompt": SYSTEM_PRESETS["默认助手"],
-        "last_prompt_tokens": 0,
-        "last_completion_tokens": 0,
-        "total_prompt_tokens": 0,
-        "total_completion_tokens": 0,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -220,15 +170,10 @@ def inject_glass_theme_css(theme_mode: str) -> None:
             "accent_border": "rgba(129, 140, 248, 0.34)",
             "text_primary": "#F1F5F9",
             "text_secondary": "#A6B4CC",
-            "sidebar_bg": "rgba(13, 18, 31, 0.86)",
             "input_bg": "rgba(20, 26, 42, 0.74)",
             "bottom_fade": "linear-gradient(to top, rgba(9, 12, 20, 0.96) 58%, rgba(9, 12, 20, 0) 100%)",
             "shadow_soft": "0 14px 36px rgba(0, 0, 0, 0.45)",
             "shadow_card": "0 8px 28px rgba(0, 0, 0, 0.28)",
-            "popover_bg": "#111726",
-            "pill_bg": "rgba(99, 102, 241, 0.14)",
-            "action_hover_bg": "rgba(148, 163, 184, 0.12)",
-            "divider": "rgba(148, 163, 184, 0.14)",
         }
     else:
         tokens = {
@@ -244,15 +189,10 @@ def inject_glass_theme_css(theme_mode: str) -> None:
             "accent_border": "rgba(99, 102, 241, 0.28)",
             "text_primary": "#0F172A",
             "text_secondary": "#475569",
-            "sidebar_bg": "rgba(248, 250, 255, 0.90)",
             "input_bg": "rgba(255, 255, 255, 0.84)",
             "bottom_fade": "linear-gradient(to top, rgba(243, 246, 252, 0.97) 58%, rgba(243, 246, 252, 0) 100%)",
             "shadow_soft": "0 12px 32px rgba(15, 23, 42, 0.10)",
             "shadow_card": "0 8px 24px rgba(15, 23, 42, 0.06)",
-            "popover_bg": "#FFFFFF",
-            "pill_bg": "rgba(99, 102, 241, 0.10)",
-            "action_hover_bg": "rgba(15, 23, 42, 0.06)",
-            "divider": "rgba(15, 23, 42, 0.10)",
         }
 
     css = f"""
@@ -270,15 +210,10 @@ def inject_glass_theme_css(theme_mode: str) -> None:
         --accent-border: {tokens["accent_border"]};
         --text-primary: {tokens["text_primary"]};
         --text-secondary: {tokens["text_secondary"]};
-        --sidebar-bg: {tokens["sidebar_bg"]};
         --input-bg: {tokens["input_bg"]};
         --bottom-fade: {tokens["bottom_fade"]};
         --shadow-soft: {tokens["shadow_soft"]};
         --shadow-card: {tokens["shadow_card"]};
-        --popover-bg: {tokens["popover_bg"]};
-        --pill-bg: {tokens["pill_bg"]};
-        --action-hover-bg: {tokens["action_hover_bg"]};
-        --divider: {tokens["divider"]};
         --code-bg: #141720;
         --code-border: rgba(148, 163, 184, 0.16);
     }}
@@ -298,59 +233,22 @@ def inject_glass_theme_css(theme_mode: str) -> None:
         background-attachment: fixed !important;
     }}
 
-    /* 隐藏默认顶部装饰条与页脚水印，同时保留侧边栏展开按钮 */
+    /* 纯净聊天界面：隐藏默认顶栏、侧边栏入口与页脚水印 */
+    header[data-testid="stHeader"],
+    section[data-testid="stSidebar"],
+    [data-testid="stSidebarCollapsedControl"],
     [data-testid="stDecoration"],
     #MainMenu,
     footer {{
         display: none !important;
     }}
 
-    header[data-testid="stHeader"] {{
-        background: transparent !important;
-        height: 0 !important;
-        min-height: 0 !important;
-        overflow: visible !important;
-        pointer-events: none !important;
-    }}
-
-    header[data-testid="stHeader"] [data-testid="stToolbar"] {{
-        display: none !important;
-    }}
-
-    header[data-testid="stHeader"] [data-testid="stExpandSidebarButton"],
-    header[data-testid="stHeader"] button[kind="headerNoPadding"] {{
-        pointer-events: auto !important;
-        position: fixed !important;
-        top: 10px !important;
-        left: 12px !important;
-        z-index: 1050 !important;
-        width: 36px !important;
-        height: 36px !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        background: var(--glass-bg) !important;
-        backdrop-filter: blur(16px) !important;
-        -webkit-backdrop-filter: blur(16px) !important;
-        border: 1px solid var(--glass-border) !important;
-        border-radius: 10px !important;
-        color: var(--text-primary) !important;
-        transition: border-color 0.2s ease, background 0.2s ease !important;
-    }}
-
-    header[data-testid="stHeader"] [data-testid="stExpandSidebarButton"]:hover {{
-        border-color: var(--glass-border-focus) !important;
-        background: var(--glass-bg-hover) !important;
-    }}
-
-    /* 主容器去除多余边距，让顶部导航栏全宽贴顶 */
     .stMainBlockContainer,
     [data-testid="stMainBlockContainer"] {{
         max-width: 100% !important;
         padding: 0 !important;
     }}
 
-    /* 隐藏零高度 JS 增强 iframe 占位 */
     iframe[height="0"] {{
         display: block !important;
         height: 0 !important;
@@ -358,55 +256,6 @@ def inject_glass_theme_css(theme_mode: str) -> None:
         border: none !important;
         margin: 0 !important;
         padding: 0 !important;
-    }}
-
-    /* ===== 侧边栏毛玻璃样式 ===== */
-    section[data-testid="stSidebar"] {{
-        background: var(--sidebar-bg) !important;
-        backdrop-filter: blur(18px) !important;
-        -webkit-backdrop-filter: blur(18px) !important;
-        border-right: 1px solid var(--glass-border) !important;
-    }}
-
-    section[data-testid="stSidebar"] * {{
-        color: var(--text-primary);
-    }}
-
-    section[data-testid="stSidebar"] [data-testid="stMetricValue"] {{
-        font-size: 1.25rem !important;
-        font-weight: 600 !important;
-        color: var(--text-primary) !important;
-    }}
-
-    section[data-testid="stSidebar"] [data-testid="stMetricLabel"],
-    section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {{
-        color: var(--text-secondary) !important;
-    }}
-
-    section[data-testid="stSidebar"] textarea,
-    section[data-testid="stSidebar"] [data-baseweb="select"] > div {{
-        background: var(--glass-bg) !important;
-        border: 1px solid var(--glass-border) !important;
-        border-radius: 12px !important;
-        color: var(--text-primary) !important;
-    }}
-
-    section[data-testid="stSidebar"] textarea:focus,
-    section[data-testid="stSidebar"] [data-baseweb="select"] > div:focus-within {{
-        border-color: var(--glass-border-focus) !important;
-    }}
-
-    section[data-testid="stSidebar"] button {{
-        background: var(--glass-bg) !important;
-        border: 1px solid var(--glass-border) !important;
-        border-radius: 12px !important;
-        color: var(--text-primary) !important;
-        transition: border-color 0.2s ease, background 0.2s ease !important;
-    }}
-
-    section[data-testid="stSidebar"] button:hover:not(:disabled) {{
-        border-color: var(--glass-border-focus) !important;
-        background: var(--glass-bg-hover) !important;
     }}
 
     /* ===== 顶部固定毛玻璃导航栏（高度 56px）===== */
@@ -418,7 +267,7 @@ def inject_glass_theme_css(theme_mode: str) -> None:
         height: 56px !important;
         min-height: 56px !important;
         max-height: 56px !important;
-        padding: 0 20px 0 58px !important;
+        padding: 0 20px !important;
         background: var(--glass-bg) !important;
         backdrop-filter: blur(16px) !important;
         -webkit-backdrop-filter: blur(16px) !important;
@@ -432,7 +281,7 @@ def inject_glass_theme_css(theme_mode: str) -> None:
     .st-key-top_navbar [data-testid="stVerticalBlock"],
     .st-key-top_navbar [data-testid="stHorizontalBlock"] {{
         width: 100% !important;
-        gap: 0.5rem !important;
+        gap: 0.45rem !important;
         align-items: center !important;
         margin: 0 !important;
         padding: 0 !important;
@@ -463,42 +312,16 @@ def inject_glass_theme_css(theme_mode: str) -> None:
     }}
 
     .nav-title {{
-        font-size: 0.96rem;
+        font-size: 0.98rem;
         font-weight: 650;
         letter-spacing: 0.01em;
         color: var(--text-primary);
         white-space: nowrap;
     }}
 
-    /* 导航栏模型选择胶囊 */
-    .st-key-nav_model_select [data-baseweb="select"] > div {{
-        min-height: 32px !important;
-        height: 32px !important;
-        padding: 0 10px !important;
-        border-radius: 999px !important;
-        background: var(--pill-bg) !important;
-        border: 1px solid var(--glass-border) !important;
-        color: var(--text-primary) !important;
-        font-size: 0.80rem !important;
-        font-weight: 500 !important;
-        transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
-    }}
-
-    .st-key-nav_model_select [data-baseweb="select"] > div:hover,
-    .st-key-nav_model_select [data-baseweb="select"] > div:focus-within {{
-        border-color: var(--glass-border-focus) !important;
-        box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.16) !important;
-    }}
-
-    .st-key-nav_model_select [data-baseweb="select"] span,
-    .st-key-nav_model_select [data-baseweb="select"] svg {{
-        color: var(--text-primary) !important;
-        fill: var(--text-secondary) !important;
-    }}
-
-    /* 导航栏右侧图标按钮 */
     .st-key-theme_toggle_btn button,
-    .st-key-nav_clear_btn button {{
+    .st-key-nav_clear_btn button,
+    .st-key-nav_logout_btn button {{
         width: 36px !important;
         height: 36px !important;
         min-height: 36px !important;
@@ -512,25 +335,10 @@ def inject_glass_theme_css(theme_mode: str) -> None:
     }}
 
     .st-key-theme_toggle_btn button:hover:not(:disabled),
-    .st-key-nav_clear_btn button:hover:not(:disabled) {{
+    .st-key-nav_clear_btn button:hover:not(:disabled),
+    .st-key-nav_logout_btn button:hover:not(:disabled) {{
         background: var(--glass-bg-hover) !important;
         border-color: var(--glass-border-focus) !important;
-    }}
-
-    /* 下拉菜单浮层配色适配 */
-    [data-baseweb="popover"] ul,
-    [data-baseweb="menu"] {{
-        background: var(--popover-bg) !important;
-        border: 1px solid var(--glass-border) !important;
-        border-radius: 12px !important;
-    }}
-
-    [data-baseweb="menu"] li {{
-        color: var(--text-primary) !important;
-    }}
-
-    [data-baseweb="menu"] li:hover {{
-        background: var(--accent-soft) !important;
     }}
 
     /* ===== 内容区居中且最大宽度 768px ===== */
@@ -545,7 +353,7 @@ def inject_glass_theme_css(theme_mode: str) -> None:
     /* ===== 空状态欢迎语 + 4 张毛玻璃快捷提问卡片 ===== */
     .welcome-hero {{
         text-align: center;
-        padding: 46px 12px 30px 12px;
+        padding: 52px 12px 32px 12px;
     }}
 
     .welcome-badge {{
@@ -585,7 +393,7 @@ def inject_glass_theme_css(theme_mode: str) -> None:
 
     [class*="st-key-quick_card_"] button {{
         width: 100% !important;
-        min-height: 98px !important;
+        min-height: 96px !important;
         height: auto !important;
         padding: 15px 18px !important;
         text-align: left !important;
@@ -625,7 +433,6 @@ def inject_glass_theme_css(theme_mode: str) -> None:
     }}
 
     /* ===== 消息排版层级 ===== */
-    /* 用户消息：半透明靛蓝圆角气泡右对齐 */
     [class*="st-key-user_msg_"] {{
         width: 100% !important;
         margin: 14px 0 20px 0 !important;
@@ -662,7 +469,6 @@ def inject_glass_theme_css(theme_mode: str) -> None:
         margin-bottom: 8px !important;
     }}
 
-    /* AI 回复：去边框文档流左对齐 */
     [class*="st-key-assistant_msg_"] {{
         width: 100% !important;
         background: transparent !important;
@@ -706,22 +512,7 @@ def inject_glass_theme_css(theme_mode: str) -> None:
         color: #818CF8 !important;
     }}
 
-    /* 思考过程折叠框毛玻璃质感 */
-    [class*="st-key-assistant_msg_"] [data-testid="stExpander"] {{
-        background: var(--glass-bg) !important;
-        backdrop-filter: blur(12px) !important;
-        border: 1px solid var(--glass-border) !important;
-        border-radius: 12px !important;
-        margin-bottom: 12px !important;
-        overflow: hidden !important;
-    }}
-
-    [class*="st-key-assistant_msg_"] [data-testid="stExpander"] summary {{
-        color: var(--text-secondary) !important;
-        font-size: 0.85rem !important;
-    }}
-
-    /* AI 悬停操作栏（「复制」「重新生成」） */
+    /* 悬停平滑显示「复制」「重新生成」 */
     [class*="st-key-msg_actions_"] {{
         opacity: 0;
         transform: translateY(3px);
@@ -809,7 +600,6 @@ def inject_glass_theme_css(theme_mode: str) -> None:
         line-height: 1.65 !important;
     }}
 
-    /* 隐藏 Streamlit 默认仅悬停可见的原生代码复制按钮，交由自定义顶部栏接管 */
     [data-testid="stCode"].glass-code-enhanced [data-testid="stCodeCopyButton"],
     [data-testid="stCode"].glass-code-enhanced button[title*="Copy"] {{
         display: none !important;
@@ -996,7 +786,6 @@ def inject_glass_theme_css(theme_mode: str) -> None:
         height: 42px !important;
     }}
 
-    /* 思考中微弱呼吸动画 */
     .thinking-pulse {{
         display: inline-flex;
         align-items: center;
@@ -1019,7 +808,7 @@ def inject_glass_theme_css(theme_mode: str) -> None:
 def inject_ui_enhancer(is_streaming: bool) -> None:
     """
     注入轻量级同源 DOM 交互增强器：
-    1. 为每条 AI 回复的悬停操作栏渲染一键「复制」按钮及成功反馈（不触发整页 rerun）
+    1. 为每条 AI 回复的悬停操作栏渲染一键「复制」按钮及成功反馈
     2. 为每个代码块添加顶部语言标签与一键复制成功状态反馈
     3. 监听主滚动区：向上翻看历史时停止自动滚底并浮现圆形毛玻璃「回到底部」按钮
     """
@@ -1182,7 +971,6 @@ def inject_ui_enhancer(is_streaming: bool) -> None:
                     scroller.addEventListener("scroll", updateScrollState, {{ passive: true }});
                 }}
 
-                // 仅在流式输出且用户未主动向上翻看历史时，柔和保持底部可见
                 if (parentWin.__glassIsStreaming && !parentWin.__glassUserScrolledUp) {{
                     scroller.scrollTop = scroller.scrollHeight;
                 }}
@@ -1204,9 +992,7 @@ def inject_ui_enhancer(is_streaming: bool) -> None:
                 observer.observe(doc.body, {{ childList: true, subtree: true }});
                 parentWin.__glassObserver = observer;
             }}
-        }} catch (_) {{
-            // 降级静默处理，保证核心功能与纯 CSS 视觉不受影响
-        }}
+        }} catch (_) {{}}
     }})();
     </script>
     """
@@ -1251,7 +1037,7 @@ def ensure_env_configured(config: dict[str, Any]) -> None:
 
 
 def ensure_authenticated(access_password: str) -> None:
-    """登录门禁：未通过验证时仅渲染居中毛玻璃登录卡片并彻底阻断主界面与侧边栏。"""
+    """登录门禁：未通过验证时仅渲染居中毛玻璃登录卡片并彻底阻断主界面。"""
     if st.session_state.get("authenticated", False):
         return
 
@@ -1267,10 +1053,10 @@ def ensure_authenticated(access_password: str) -> None:
                         <span class="starburst-icon" style="width:24px; height:24px;"></span>
                     </div>
                     <h3 style="margin:0 0 6px 0; font-size:1.25rem; font-weight:650; color:var(--text-primary);">
-                        内部 AI 助手登录
+                        星芒 AI 登录
                     </h3>
                     <p style="margin:0; font-size:0.86rem; color:var(--text-secondary);">
-                        仅限小圈子内部成员使用，请输入访问密码继续
+                        请输入访问密码，进入日常聊天
                     </p>
                 </div>
                 """,
@@ -1304,22 +1090,21 @@ def ensure_authenticated(access_password: str) -> None:
                     time.sleep(1)
                     st.error("访问密码错误，请重新输入。")
 
-    # 关键安全屏障：未登录时立即终止渲染，杜绝侧边栏及主聊天区域暴露
     st.stop()
 
 
 # ==============================================================================
-# 多模态图片预处理、消息构造与导出工具
+# 多模态图片预处理、消息构造与异常处理
 # ==============================================================================
 
 
 def process_uploaded_image(uploaded_file: Any) -> str:
     """
     使用 Pillow 预处理上传图片，返回压缩后的 JPEG Base64 字符串：
-    1. 修正 EXIF 拍摄方向（手机竖拍防旋转）
-    2. 对 RGBA / LA / PA / P 等含透明或调色板通道的图片合成白底并转为 RGB
+    1. 修正 EXIF 拍摄方向
+    2. 对含透明或调色板通道的图片合成白底并转为 RGB
     3. 长边等比缩放至 1024px 以内
-    4. 编码为 JPEG（质量 80）并转为 Base64，显著降低多模态 Token 与传输开销
+    4. 编码为 JPEG（质量 80）并转为 Base64
     """
     raw_bytes = uploaded_file.getvalue()
     with Image.open(io.BytesIO(raw_bytes)) as img:
@@ -1344,15 +1129,14 @@ def process_uploaded_image(uploaded_file: Any) -> str:
 
 def build_api_messages(
     history: list[dict[str, Any]],
-    context_turns: int,
-    system_prompt: str,
+    context_turns: int = DEFAULT_CONTEXT_TURNS,
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
 ) -> list[dict[str, Any]]:
     """
     构建发送给模型的 OpenAI 兼容 messages 列表：
-    - 动态在头部拼接 System Prompt（不污染会话历史）
+    - 头部附带日常对话 System Prompt
     - 仅截取最近 N 轮对话发送，且确保窗口起点为 user 消息
-    - 单轮传图策略：仅在当前最新一轮 user 消息中附带图片 Base64，
-      历史轮次仅发送文本，防止多轮追问重复计费图片 Token
+    - 单轮传图策略：仅在当前最新一轮 user 消息中附带图片 Base64
     """
     api_messages: list[dict[str, Any]] = []
 
@@ -1373,7 +1157,7 @@ def build_api_messages(
         is_current_turn = idx == last_index and role == "user"
 
         if is_current_turn and image_b64:
-            prompt_text = text_content.strip() or "请查看并分析这张图片。"
+            prompt_text = text_content.strip() or "请帮我看看这张图片。"
             api_messages.append(
                 {
                     "role": "user",
@@ -1390,7 +1174,7 @@ def build_api_messages(
             )
         else:
             if role == "user" and not text_content.strip() and image_b64:
-                fallback_text = "[用户此前上传了一张图片]"
+                fallback_text = "[用户此前发了一张图片]"
             else:
                 fallback_text = text_content
             api_messages.append({"role": role, "content": fallback_text})
@@ -1398,88 +1182,35 @@ def build_api_messages(
     return api_messages
 
 
-def export_chat_to_markdown(
-    messages: list[dict[str, Any]],
-    model_name: str,
-    system_prompt: str,
-) -> str:
-    """将完整对话历史导出为结构清晰的 Markdown 文本。"""
-    export_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    lines: list[str] = [
-        "# AI 对话记录导出",
-        "",
-        f"- **导出时间**：{export_time}",
-        f"- **使用模型**：`{model_name}`",
-    ]
-    if system_prompt.strip():
-        lines.append(f"- **当前 System Prompt**：{system_prompt.strip()}")
-    lines.extend(["", "---", ""])
-
-    for msg in messages:
-        role_label = "👤 用户" if msg["role"] == "user" else "🤖 助手"
-        lines.append(f"## {role_label}")
-        lines.append("")
-
-        if msg["role"] == "user" and msg.get("image_b64"):
-            lines.append("*[附带 1 张图片]*")
-            lines.append("")
-
-        if msg["role"] == "assistant" and msg.get("reasoning"):
-            lines.extend(
-                [
-                    "<details>",
-                    "<summary>思考过程</summary>",
-                    "",
-                    msg["reasoning"].strip(),
-                    "",
-                    "</details>",
-                    "",
-                ]
-            )
-
-        content = msg.get("content", "").strip()
-        if content:
-            lines.append(content)
-            lines.append("")
-
-        lines.extend(["---", ""])
-
-    return "\n".join(lines)
-
-
 def format_api_error(exc: Exception) -> str:
-    """将底层异常转换为友好、安全的中文错误提示，避免暴露堆栈与敏感信息。"""
+    """将底层异常转换为友好的中文提示。"""
     if isinstance(exc, AuthenticationError):
-        return "❌ API 密钥无效或已过期（401），请联系管理员检查 `GEMINI_API_KEY` 配置。"
+        return "❌ 服务密钥无效或已过期，请联系管理员检查配置。"
     if isinstance(exc, PermissionDeniedError):
-        return "❌ 当前 API 密钥无权访问该模型或所在地区受限（403），请联系管理员核查权限。"
+        return "❌ 当前密钥无权访问服务，请联系管理员核查权限。"
     if isinstance(exc, NotFoundError):
-        return "❌ 未找到指定的模型或接口地址（404），请检查 `MODEL_NAME` 与 `BASE_URL` 配置。"
+        return "❌ 服务模型或接口地址配置异常，请联系管理员检查。"
     if isinstance(exc, RateLimitError):
-        return "⏳ 请求过于频繁或已触发 API 速率/配额限制（429），请稍等片刻后再试。"
+        return "⏳ 当前对话人数较多或请求太快，请稍等几秒再试。"
     if isinstance(exc, APITimeoutError):
-        return f"⌛ 请求超时（超过 {int(API_TIMEOUT_SECONDS)} 秒未响应），请稍后重试或缩短输入内容。"
+        return "⌛ 响应有点慢超时了，请再试一次。"
     if isinstance(exc, APIConnectionError):
-        return "🌐 网络连接失败，暂时无法访问 Gemini API 服务，请稍后重试。"
+        return "🌐 网络连接暂时不稳定，请稍后重试。"
     if isinstance(exc, BadRequestError):
-        return "⚠️ 请求参数不被接口接受（400），请尝试减少上下文轮数、精简文本或更换图片后重试。"
+        return "⚠️ 这条内容或图片格式无法处理，请换种说法或换张图片试试。"
     if isinstance(exc, APIStatusError):
-        return f"⚠️ 模型服务暂时返回异常（HTTP {exc.status_code}），请稍后重试。"
-    return "⚠️ 生成回复时发生未知错误，请稍后重试。"
+        return "⚠️ 服务暂时开小差了，请稍后重试。"
+    return "⚠️ 回复时出了点小状况，请稍后重试。"
 
 
 def clear_conversation() -> None:
-    """清空对话历史并重置 Token 统计。"""
+    """清空当前对话记录。"""
     st.session_state.messages = []
-    st.session_state.last_prompt_tokens = 0
-    st.session_state.last_completion_tokens = 0
-    st.session_state.total_prompt_tokens = 0
-    st.session_state.total_completion_tokens = 0
     st.session_state.last_error = None
 
 
 def submit_user_message(user_text: str, image_b64: str | None = None) -> None:
-    """写入用户消息并置位生成锁，随后 rerun 禁用交互并进入流式输出。"""
+    """写入用户消息并置位生成锁，随后 rerun 开始流式输出。"""
     st.session_state.messages.append(
         {
             "role": "user",
@@ -1494,38 +1225,18 @@ def submit_user_message(user_text: str, image_b64: str | None = None) -> None:
 
 
 # ==============================================================================
-# 顶部毛玻璃导航栏与侧边栏控制台
+# 顶部毛玻璃导航栏、欢迎态、聊天区与流式输出
 # ==============================================================================
 
 
-def on_preset_change() -> None:
-    """切换 System Prompt 预设时同步更新文本框内容。"""
-    preset_name = st.session_state.system_preset
-    if preset_name != "自定义":
-        st.session_state.system_prompt = SYSTEM_PRESETS[preset_name]
-
-
-def on_system_prompt_edit() -> None:
-    """手动编辑 System Prompt 后，如与当前预设不一致则自动切为“自定义”。"""
-    preset_name = st.session_state.system_preset
-    if (
-        preset_name != "自定义"
-        and st.session_state.system_prompt != SYSTEM_PRESETS[preset_name]
-    ):
-        st.session_state.system_preset = "自定义"
-
-
-def render_top_navbar(config: dict[str, Any]) -> None:
-    """渲染 56px 顶部固定毛玻璃导航栏：星芒 Logo、标题、模型胶囊、明暗切换、清空按钮。"""
+def render_top_navbar() -> None:
+    """渲染 56px 顶部固定毛玻璃导航栏：极简星芒 Logo + 标题 + 明暗切换 / 清空 / 退出按钮。"""
     is_busy = st.session_state.is_generating
     is_dark = st.session_state.theme_mode == "dark"
-    model_options = get_model_options(config["model_name"])
-    if st.session_state.selected_model not in model_options:
-        st.session_state.selected_model = config["model_name"]
 
     with st.container(key="top_navbar"):
-        brand_col, model_col, spacer_col, theme_col, clear_col = st.columns(
-            [0.24, 0.28, 0.34, 0.07, 0.07],
+        brand_col, spacer_col, theme_col, clear_col, logout_col = st.columns(
+            [0.36, 0.43, 0.07, 0.07, 0.07],
             vertical_alignment="center",
         )
         with brand_col:
@@ -1536,22 +1247,13 @@ def render_top_navbar(config: dict[str, Any]) -> None:
                 "</div>",
                 unsafe_allow_html=True,
             )
-        with model_col:
-            with st.container(key="nav_model_select"):
-                st.selectbox(
-                    "模型",
-                    options=model_options,
-                    key="selected_model",
-                    label_visibility="collapsed",
-                    disabled=is_busy,
-                )
         with spacer_col:
             st.empty()
         with theme_col:
             if st.button(
                 "☀️" if is_dark else "🌙",
                 key="theme_toggle_btn",
-                help="切换到浅色模式" if is_dark else "切换到深色模式",
+                help="切换浅色模式" if is_dark else "切换深色模式",
                 disabled=is_busy,
             ):
                 st.session_state.theme_mode = "light" if is_dark else "dark"
@@ -1560,126 +1262,36 @@ def render_top_navbar(config: dict[str, Any]) -> None:
             if st.button(
                 "🗑️",
                 key="nav_clear_btn",
-                help="清空当前对话并重置 Token 统计",
+                help="清空当前对话",
                 disabled=is_busy or not st.session_state.messages,
             ):
                 clear_conversation()
                 st.rerun()
-
-
-def render_sidebar() -> None:
-    """渲染侧边栏控制台：上下文轮数、System Prompt、Token 统计、导出、清空与退出。"""
-    is_busy = st.session_state.is_generating
-    active_model = st.session_state.selected_model
-
-    with st.sidebar:
-        st.markdown(
-            "<div class='nav-brand' style='margin-bottom:6px;'>"
-            "<span class='starburst-icon'></span>"
-            "<span class='nav-title' style='font-size:1.05rem;'>对话控制台</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        st.caption(f"当前模型：`{active_model}`")
-
-        st.divider()
-
-        st.slider(
-            "上下文携带轮数",
-            min_value=MIN_CONTEXT_TURNS,
-            max_value=MAX_CONTEXT_TURNS,
-            step=1,
-            key="context_turns",
-            disabled=is_busy,
-            help="页面始终保留全部历史记录，但每次请求仅发送最近 N 轮对话，用于有效控制 Token 成本。",
-        )
-
-        st.selectbox(
-            "System Prompt 预设",
-            options=list(SYSTEM_PRESETS.keys()),
-            key="system_preset",
-            on_change=on_preset_change,
-            disabled=is_busy,
-        )
-        st.text_area(
-            "System Prompt 内容",
-            key="system_prompt",
-            height=110,
-            on_change=on_system_prompt_edit,
-            disabled=is_busy,
-            placeholder="可选：设定模型角色、语气或输出规范（下一轮立即生效）...",
-            help="不会写入历史消息，每次请求动态拼接到消息头部，修改后下一轮立即生效。",
-        )
-
-        st.divider()
-
-        st.markdown("#### 📊 Token 消耗统计")
-        st.caption("上一轮消耗")
-        last_col1, last_col2 = st.columns(2)
-        last_col1.metric("输入", f"{st.session_state.last_prompt_tokens:,}")
-        last_col2.metric("输出", f"{st.session_state.last_completion_tokens:,}")
-
-        st.caption("本次会话累计")
-        total_col1, total_col2 = st.columns(2)
-        total_col1.metric("累计输入", f"{st.session_state.total_prompt_tokens:,}")
-        total_col2.metric("累计输出", f"{st.session_state.total_completion_tokens:,}")
-
-        st.divider()
-
-        export_filename = f"gemini_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-        markdown_content = export_chat_to_markdown(
-            messages=st.session_state.messages,
-            model_name=active_model,
-            system_prompt=st.session_state.system_prompt,
-        )
-        st.download_button(
-            label="📥 导出对话 (.md)",
-            data=markdown_content.encode("utf-8"),
-            file_name=export_filename,
-            mime="text/markdown",
-            use_container_width=True,
-            disabled=is_busy or not st.session_state.messages,
-        )
-
-        if st.button(
-            "🗑️ 清空当前对话",
-            key="sidebar_clear_btn",
-            use_container_width=True,
-            disabled=is_busy or not st.session_state.messages,
-        ):
-            clear_conversation()
-            st.rerun()
-
-        if st.button(
-            "🚪 退出登录",
-            key="sidebar_logout_btn",
-            use_container_width=True,
-            disabled=is_busy,
-        ):
-            st.session_state.authenticated = False
-            st.session_state.is_generating = False
-            st.session_state.pending_generation = False
-            st.session_state.last_error = None
-            st.rerun()
-
-
-# ==============================================================================
-# 欢迎态、历史对话渲染与流式输出
-# ==============================================================================
+        with logout_col:
+            if st.button(
+                "🚪",
+                key="nav_logout_btn",
+                help="退出登录",
+                disabled=is_busy,
+            ):
+                st.session_state.authenticated = False
+                st.session_state.is_generating = False
+                st.session_state.pending_generation = False
+                st.session_state.last_error = None
+                st.rerun()
 
 
 def render_welcome_state() -> None:
-    """无消息时展示居中欢迎语 + 4 张毛玻璃快捷提问卡片（点击直接发起对话）。"""
-    active_model = html.escape(st.session_state.selected_model)
+    """无消息时展示居中欢迎语 + 4 张毛玻璃日常快捷提问卡片。"""
     st.markdown(
-        f"""
+        """
         <div class="welcome-hero">
             <div class="welcome-badge">
                 <span class="starburst-icon"></span>
             </div>
-            <h1 class="welcome-title">你好，今天想探索什么？</h1>
+            <h1 class="welcome-title">嗨，今天想聊点什么？</h1>
             <p class="welcome-subtitle">
-                由 <code>{active_model}</code> 驱动 · 支持文字多轮对话与低成本识图分析
+                日常聊天、查点生活灵感、润色文字，或者直接发张照片让我看看
             </p>
         </div>
         """,
@@ -1725,28 +1337,23 @@ def render_chat_history() -> None:
                     if msg.get("content"):
                         st.markdown(msg["content"])
                     elif image_b64:
-                        st.caption("（已上传图片）")
+                        st.caption("（已发送图片）")
         else:
             is_last_assistant = idx == total - 1
-            model_label = html.escape(msg.get("model") or st.session_state.selected_model)
             reply_text = msg.get("content", "")
             copy_b64 = base64.b64encode(reply_text.encode("utf-8")).decode("ascii")
 
             with st.container(key=f"assistant_msg_{idx}"):
                 st.markdown(
-                    f"<div class='ai-header'>"
-                    f"<span class='starburst-icon'></span>"
-                    f"<span class='ai-header-label'>{model_label}</span>"
-                    f"</div>",
+                    "<div class='ai-header'>"
+                    "<span class='starburst-icon'></span>"
+                    "<span class='ai-header-label'>星芒 AI</span>"
+                    "</div>",
                     unsafe_allow_html=True,
                 )
-                if msg.get("reasoning"):
-                    with st.expander("思考过程", expanded=False):
-                        st.markdown(msg["reasoning"])
-
                 st.markdown(reply_text)
 
-                # 悬停平滑显示的「复制」「重新生成」操作栏
+                # 悬停平滑显示「复制」「重新生成」
                 with st.container(key=f"msg_actions_{idx}"):
                     if is_last_assistant and not is_busy:
                         copy_col, regen_col, _ = st.columns([0.14, 0.19, 0.67])
@@ -1760,7 +1367,7 @@ def render_chat_history() -> None:
                                 "↻ 重新生成",
                                 key="regenerate_btn",
                                 disabled=is_busy,
-                                help="移除当前回复并基于上一条提问重新生成（包含图片时会一并重传）",
+                                help="换一种说法重新回答",
                             ):
                                 if (
                                     not st.session_state.is_generating
@@ -1778,7 +1385,6 @@ def render_chat_history() -> None:
                             unsafe_allow_html=True,
                         )
 
-    # 若上一轮因异常中断未生成助手回复，提供一键重试按钮
     if (
         not is_busy
         and messages[-1]["role"] == "user"
@@ -1788,7 +1394,7 @@ def render_chat_history() -> None:
             "↻ 重试生成",
             key="retry_btn",
             disabled=is_busy,
-            help="基于上一条未成功获得回复的提问重新发起请求",
+            help="重新发送上一条提问",
         ):
             if not st.session_state.is_generating and st.session_state.messages:
                 st.session_state.last_error = None
@@ -1798,51 +1404,36 @@ def render_chat_history() -> None:
 
 
 def stream_assistant_response(config: dict[str, Any]) -> None:
-    """
-    执行流式对话生成：
-    - 仅在成功获得有效正文时才将助手消息写入对话历史
-    - 异常或中断时绝不写入残缺内容，避免污染后续上下文
-    - finally 中强制释放生成锁，防止界面永久卡死
-    """
+    """流式生成日常回复；异常时不写入残缺内容，并在 finally 释放生成锁。"""
     error_message: str | None = None
-    active_model = st.session_state.selected_model
 
     with st.container(key="assistant_msg_streaming"):
         st.markdown(
-            f"<div class='ai-header'>"
-            f"<span class='starburst-icon'></span>"
-            f"<span class='ai-header-label'>{html.escape(active_model)}</span>"
-            f"</div>",
+            "<div class='ai-header'>"
+            "<span class='starburst-icon'></span>"
+            "<span class='ai-header-label'>星芒 AI</span>"
+            "</div>",
             unsafe_allow_html=True,
         )
         loading_placeholder = st.empty()
         loading_placeholder.markdown(
-            "<div class='thinking-pulse'>✦ 正在思考中...</div>",
+            "<div class='thinking-pulse'>✦ 正在回复中...</div>",
             unsafe_allow_html=True,
         )
-        reasoning_container = st.empty()
         content_placeholder = st.empty()
 
-        reasoning_parts: list[str] = []
         content_parts: list[str] = []
-        reasoning_placeholder: Any = None
         first_content_received = False
-        usage_info: Any = None
 
         try:
             client = get_openai_client(config["api_key"], config["base_url"])
-            api_messages = build_api_messages(
-                history=st.session_state.messages,
-                context_turns=st.session_state.context_turns,
-                system_prompt=st.session_state.system_prompt,
-            )
+            api_messages = build_api_messages(history=st.session_state.messages)
 
             request_kwargs: dict[str, Any] = {
-                "model": active_model,
+                "model": config["model_name"],
                 "messages": api_messages,
                 "max_tokens": MAX_OUTPUT_TOKENS,
                 "stream": True,
-                "stream_options": {"include_usage": True},
             }
             if config["reasoning_effort"] is not None:
                 request_kwargs["reasoning_effort"] = config["reasoning_effort"]
@@ -1850,10 +1441,6 @@ def stream_assistant_response(config: dict[str, Any]) -> None:
             stream = client.chat.completions.create(**request_kwargs)
 
             for chunk in stream:
-                chunk_usage = getattr(chunk, "usage", None)
-                if chunk_usage is not None:
-                    usage_info = chunk_usage
-
                 choices = getattr(chunk, "choices", None)
                 if not choices:
                     continue
@@ -1861,14 +1448,6 @@ def stream_assistant_response(config: dict[str, Any]) -> None:
                 delta = getattr(choices[0], "delta", None)
                 if delta is None:
                     continue
-
-                reasoning_piece = getattr(delta, "reasoning_content", None)
-                if reasoning_piece:
-                    reasoning_parts.append(reasoning_piece)
-                    if reasoning_placeholder is None:
-                        with reasoning_container.expander("思考过程", expanded=False):
-                            reasoning_placeholder = st.empty()
-                    reasoning_placeholder.markdown("".join(reasoning_parts))
 
                 content_piece = getattr(delta, "content", None)
                 if content_piece:
@@ -1880,29 +1459,15 @@ def stream_assistant_response(config: dict[str, Any]) -> None:
 
             loading_placeholder.empty()
             full_reply = "".join(content_parts)
-            full_reasoning = "".join(reasoning_parts).strip()
 
             if not full_reply.strip():
-                error_message = "⚠️ 模型未返回有效正文，可能触发了内容安全策略或连接提前中断，请尝试调整表述后重试。"
+                error_message = "⚠️ 刚才没有收到完整回复，请换个说法再试一次。"
             else:
                 content_placeholder.markdown(full_reply)
-
-                if usage_info is not None:
-                    prompt_tokens = int(getattr(usage_info, "prompt_tokens", 0) or 0)
-                    completion_tokens = int(
-                        getattr(usage_info, "completion_tokens", 0) or 0
-                    )
-                    st.session_state.last_prompt_tokens = prompt_tokens
-                    st.session_state.last_completion_tokens = completion_tokens
-                    st.session_state.total_prompt_tokens += prompt_tokens
-                    st.session_state.total_completion_tokens += completion_tokens
-
                 st.session_state.messages.append(
                     {
                         "role": "assistant",
                         "content": full_reply,
-                        "reasoning": full_reasoning or None,
-                        "model": active_model,
                     }
                 )
 
@@ -1918,9 +1483,9 @@ def stream_assistant_response(config: dict[str, Any]) -> None:
 
 
 def handle_chat_input() -> None:
-    """渲染底部悬浮圆角胶囊输入框（支持附带图片与输入上限校验）。"""
+    """渲染底部悬浮圆角胶囊输入框（支持发文字与发图）。"""
     prompt = st.chat_input(
-        placeholder=f"向星芒 AI 提问，或点击左侧回形针附带图片（最多 {MAX_INPUT_CHARS:,} 字）...",
+        placeholder="说点什么，或点左侧回形针发张图片...",
         accept_file=True,
         file_type=["png", "jpg", "jpeg", "webp"],
         max_chars=MAX_INPUT_CHARS,
@@ -1939,7 +1504,7 @@ def handle_chat_input() -> None:
 
     if len(user_text) > MAX_INPUT_CHARS:
         st.warning(
-            f"单次输入长度不能超过 {MAX_INPUT_CHARS:,} 个字符（当前 {len(user_text):,} 字符），请精简后再发送。"
+            f"单次输入长度不能超过 {MAX_INPUT_CHARS:,} 个字符，请精简后再发送。"
         )
         return
 
@@ -1948,7 +1513,7 @@ def handle_chat_input() -> None:
         try:
             image_b64 = process_uploaded_image(uploaded_files[0])
         except (UnidentifiedImageError, OSError, ValueError):
-            st.error("图片解析失败，请确认上传的是有效的 PNG / JPG / WebP 图片文件。")
+            st.error("图片解析失败，请确认上传的是有效的 PNG / JPG / WebP 图片。")
             return
 
     submit_user_message(user_text, image_b64)
@@ -1961,27 +1526,26 @@ def handle_chat_input() -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="星芒 AI · Gemini 4 Hydrogen",
+        page_title="星芒 AI · 日常聊天",
         page_icon="✦",
         layout="wide",
         initial_sidebar_state="collapsed",
     )
 
     config = load_config()
-    init_session_state(config["model_name"])
+    init_session_state()
     inject_glass_theme_css(st.session_state.theme_mode)
 
-    # 1. 启动环境变量 / Secrets 兜底检查
+    # 1. 启动密钥校验
     ensure_env_configured(config)
 
-    # 2. 登录门禁（未登录时彻底阻断侧边栏、导航栏与聊天主界面）
+    # 2. 访问密码门禁
     ensure_authenticated(config["access_password"])
 
-    # 3. 侧边栏与 56px 顶部固定毛玻璃导航栏
-    render_sidebar()
-    render_top_navbar(config)
+    # 3. 56px 顶部固定毛玻璃导航栏
+    render_top_navbar()
 
-    # 4. 768px 居中主对话舞台
+    # 4. 768px 居中聊天区
     with st.container(key="chat_stage"):
         render_chat_history()
 
@@ -1991,7 +1555,7 @@ def main() -> None:
         if st.session_state.pending_generation:
             stream_assistant_response(config)
 
-    # 5. 底部悬浮圆角胶囊输入框 + 客户端交互增强（代码栏、复制按钮、回到底部）
+    # 5. 底部悬浮胶囊输入框 + 客户端交互增强
     handle_chat_input()
     inject_ui_enhancer(is_streaming=st.session_state.pending_generation)
 
