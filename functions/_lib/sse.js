@@ -61,13 +61,30 @@ export function buildApiMessages(
   return apiMessages;
 }
 
-export function formatUpstreamError(status) {
-  if (status === 401) return "❌ 服务密钥无效或已过期，请联系管理员检查配置。";
-  if (status === 403) return "❌ 当前密钥无权访问服务，请联系管理员核查权限。";
-  if (status === 404) return "❌ 服务模型或接口地址配置异常，请联系管理员检查。";
-  if (status === 429) return "⏳ 当前对话人数较多或请求太快，请稍等几秒再试。";
-  if (status === 400) return "⚠️ 这条内容或图片格式无法处理，请换种说法或换张图片试试。";
-  return "⚠️ 模型服务暂时开小差了，请稍后重试。";
+export function extractSafeUpstreamDetail(rawText) {
+  const text = String(rawText || "").trim();
+  if (!text) return "";
+  try {
+    const parsed = JSON.parse(text);
+    const errObj = Array.isArray(parsed) ? parsed[0]?.error : parsed?.error;
+    const msg = errObj?.message || parsed?.message || "";
+    if (msg) return String(msg).replace(/\s+/g, " ").slice(0, 180);
+  } catch {
+    // 非 JSON 时截取纯文本前缀
+  }
+  return text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").slice(0, 140);
+}
+
+export function formatUpstreamError(status, rawDetail = "") {
+  const detail = extractSafeUpstreamDetail(rawDetail);
+  const suffix = detail ? `（HTTP ${status}：${detail}）` : `（HTTP ${status}）`;
+
+  if (status === 401) return `❌ 服务密钥无效或已过期${suffix}，请联系管理员检查 GEMINI_API_KEY。`;
+  if (status === 403) return `❌ 当前密钥无权访问或节点地区受限${suffix}，请联系管理员核查。`;
+  if (status === 404) return `❌ 服务模型或接口地址配置异常${suffix}，请联系管理员检查。`;
+  if (status === 429) return `⏳ 当前请求太快或配额已达上限${suffix}，请稍等几秒再试。`;
+  if (status === 400) return `⚠️ 请求参数或内容无法处理${suffix}，请核对后重试。`;
+  return `⚠️ 模型服务暂时开小差了${suffix}，请稍后重试。`;
 }
 
 export function formatExceptionError(err) {
@@ -128,7 +145,9 @@ export function createChatSseResponse({
         });
 
         if (!upstreamRes.ok || !upstreamRes.body) {
-          sendEvent("error", { error: formatUpstreamError(upstreamRes.status) });
+          const rawErr = await upstreamRes.text().catch(() => "");
+          console.error("Gemini upstream error", upstreamRes.status, rawErr.slice(0, 300));
+          sendEvent("error", { error: formatUpstreamError(upstreamRes.status, rawErr) });
           controller.close();
           return;
         }
