@@ -7,6 +7,7 @@ import {
   resolveSessionSecret,
 } from "../../_lib/auth.js";
 import { loadConfig } from "../../_lib/config.js";
+import { checkRateLimit } from "../../_lib/db.js";
 
 export async function onRequestPost({ request, env }) {
   const config = loadConfig(env);
@@ -14,6 +15,16 @@ export async function onRequestPost({ request, env }) {
     return jsonResponse(
       { detail: `缺少必要配置：${config.missing.join("、")}` },
       503,
+    );
+  }
+
+  const clientIp = (request.headers.get("CF-Connecting-IP") || "unknown").trim();
+  const limit = await checkRateLimit(env.DB, `login:${clientIp}`, 15, 300);
+  if (!limit.allowed) {
+    return jsonResponse(
+      { detail: `⏳ 尝试次数过多，请在 ${limit.retryAfter} 秒后再试。` },
+      429,
+      { "Retry-After": String(limit.retryAfter) },
     );
   }
 

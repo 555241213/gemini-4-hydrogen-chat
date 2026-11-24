@@ -9,28 +9,47 @@ import {
   resolveSessionSecret,
   verifySessionToken,
 } from "../functions/_lib/auth.js";
-import { buildApiMessages, createChatSseResponse } from "../functions/_lib/sse.js";
 import {
+  buildApiMessages,
+  buildEffectivePromptBundle,
+  createChatSseResponse,
+  parseExampleDialoguePairs,
+} from "../functions/_lib/sse.js";
+import {
+  checkRateLimit,
   clearUserConversationMessages,
+  createCharacter,
   createConversation,
+  createMemory,
   deleteConversation,
+  deleteMemory,
+  deleteMessagesFromId,
   insertMessage,
   listConversationMessages,
+  listUserCharacters,
   listUserConversations,
+  listUserMemories,
   resolveRuntimeSettings,
   setAppSetting,
   setUserPersona,
+  updateCharacter,
+  updateMemory,
+  updateMessageContent,
   upsertManagedUser,
 } from "../functions/_lib/db.js";
 
-// 轻量 D1 内存模拟器，覆盖 conversations / messages / app_settings / managed_users
+// 轻量 D1 内存模拟器，覆盖 conversations / messages / app_settings / managed_users / characters / memories / rate_limits
 function createMockD1() {
   const conversations = [];
   const messages = [];
   const appSettings = new Map();
   const managedUsers = new Map();
   const userPreferences = new Map();
+  const characters = [];
+  const memories = [];
+  const rateLimits = new Map();
   let autoId = 1;
+  let memAutoId = 1;
 
   return {
     prepare(sql) {
@@ -49,8 +68,36 @@ function createMockD1() {
             return { success: true };
           }
           if (sql.startsWith("INSERT INTO conversations")) {
-            const [id, user_id, title, created_at, updated_at] = params;
-            conversations.push({ id, user_id, title, created_at, updated_at, rowid: conversations.length + 1 });
+            if (params.length === 6) {
+              const [id, user_id, title, character_id, created_at, updated_at] = params;
+              conversations.push({
+                id,
+                user_id,
+                title,
+                character_id,
+                created_at,
+                updated_at,
+                rowid: conversations.length + 1,
+              });
+            } else {
+              const [id, user_id, title, created_at, updated_at] = params;
+              conversations.push({
+                id,
+                user_id,
+                title,
+                character_id: null,
+                created_at,
+                updated_at,
+                rowid: conversations.length + 1,
+              });
+            }
+            return { success: true };
+          }
+          if (sql.startsWith("UPDATE conversations SET character_id = NULL")) {
+            const [userId, charId] = params;
+            for (const c of conversations) {
+              if (c.user_id === userId && c.character_id === charId) c.character_id = null;
+            }
             return { success: true };
           }
           if (sql.startsWith("UPDATE conversations SET title = ?")) {
@@ -86,6 +133,21 @@ function createMockD1() {
             for (let i = messages.length - 1; i >= 0; i -= 1) {
               if (messages[i].id === id && messages[i].user_id === userId) messages.splice(i, 1);
             }
+            return { success: true };
+          }
+          if (sql.startsWith("DELETE FROM messages WHERE user_id = ? AND conversation_id = ? AND id >= ?")) {
+            const [userId, convId, fromId] = params;
+            for (let i = messages.length - 1; i >= 0; i -= 1) {
+              if (messages[i].user_id === userId && messages[i].conversation_id === convId && messages[i].id >= fromId) {
+                messages.splice(i, 1);
+              }
+            }
+            return { success: true };
+          }
+          if (sql.startsWith("UPDATE messages SET content = ? WHERE id = ? AND user_id = ?")) {
+            const [content, id, userId] = params;
+            const m = messages.find((x) => x.id === id && x.user_id === userId);
+            if (m) m.content = content;
             return { success: true };
           }
           if (sql.startsWith("DELETE FROM messages WHERE user_id = ? AND conversation_id = ?")) {
@@ -143,6 +205,68 @@ function createMockD1() {
             userPreferences.delete(params[0]);
             return { success: true };
           }
+          if (sql.startsWith("INSERT INTO characters")) {
+            const [id, user_id, name, avatar, personality, catchphrase, background, examples, first_message, is_default, created_at, updated_at] = params;
+            characters.push({ id, user_id, name, avatar, personality, catchphrase, background, examples, first_message, is_default, created_at, updated_at });
+            return { success: true };
+          }
+          if (sql.startsWith("UPDATE characters SET is_default = 0")) {
+            const [userId] = params;
+            for (const ch of characters) {
+              if (ch.user_id === userId) ch.is_default = 0;
+            }
+            return { success: true };
+          }
+          if (sql.startsWith("UPDATE characters SET name = ?")) {
+            const [name, avatar, personality, catchphrase, background, examples, first_message, is_default, updated_at, id, user_id] = params;
+            const ch = characters.find((x) => x.id === id && x.user_id === user_id);
+            if (ch) Object.assign(ch, { name, avatar, personality, catchphrase, background, examples, first_message, is_default, updated_at });
+            return { success: true };
+          }
+          if (sql.startsWith("DELETE FROM characters WHERE id = ? AND user_id = ?")) {
+            const [id, userId] = params;
+            for (let i = characters.length - 1; i >= 0; i -= 1) {
+              if (characters[i].id === id && characters[i].user_id === userId) characters.splice(i, 1);
+            }
+            return { success: true };
+          }
+          if (sql.startsWith("INSERT INTO memories")) {
+            const [user_id, character_id, content, source, created_at, updated_at] = params;
+            const id = memAutoId++;
+            memories.push({ id, user_id, character_id, content, enabled: 1, source, created_at, updated_at });
+            return { success: true, meta: { last_row_id: id } };
+          }
+          if (sql.startsWith("UPDATE memories SET content = ?")) {
+            const [content, enabled, character_id, updated_at, id, user_id] = params;
+            const m = memories.find((x) => x.id === id && x.user_id === user_id);
+            if (m) Object.assign(m, { content, enabled, character_id, updated_at });
+            return { success: true };
+          }
+          if (sql.startsWith("DELETE FROM memories WHERE user_id = ? AND character_id = ?")) {
+            const [userId, charId] = params;
+            for (let i = memories.length - 1; i >= 0; i -= 1) {
+              if (memories[i].user_id === userId && memories[i].character_id === charId) memories.splice(i, 1);
+            }
+            return { success: true };
+          }
+          if (sql.startsWith("DELETE FROM memories WHERE id = ? AND user_id = ?")) {
+            const [id, userId] = params;
+            for (let i = memories.length - 1; i >= 0; i -= 1) {
+              if (memories[i].id === id && memories[i].user_id === userId) memories.splice(i, 1);
+            }
+            return { success: true };
+          }
+          if (sql.startsWith("INSERT INTO rate_limits")) {
+            const [bucket_key, reset_at] = params;
+            rateLimits.set(bucket_key, { bucket_key, count: 1, reset_at });
+            return { success: true };
+          }
+          if (sql.startsWith("UPDATE rate_limits SET count = ?")) {
+            const [count, bucket_key] = params;
+            const r = rateLimits.get(bucket_key);
+            if (r) r.count = count;
+            return { success: true };
+          }
           throw new Error(`Unhandled SQL run: ${sql}`);
         },
         async all() {
@@ -181,6 +305,37 @@ function createMockD1() {
               results: Array.from(managedUsers.values()),
             };
           }
+          if (sql.includes("FROM characters WHERE user_id = ?")) {
+            const [userId] = params;
+            return {
+              results: characters
+                .filter((c) => c.user_id === userId)
+                .sort((a, b) => b.is_default - a.is_default || b.updated_at - a.updated_at),
+            };
+          }
+          if (sql.includes("FROM memories WHERE user_id = ? AND enabled = 1")) {
+            const [userId, charId] = params;
+            return {
+              results: memories
+                .filter((m) => {
+                  if (m.user_id !== userId || !m.enabled) return false;
+                  return charId ? m.character_id === "" || m.character_id === charId : m.character_id === "";
+                })
+                .sort((a, b) => b.id - a.id)
+                .slice(0, 25),
+            };
+          }
+          if (sql.includes("FROM memories WHERE user_id = ?")) {
+            const [userId, charId] = params;
+            return {
+              results: memories
+                .filter((m) => {
+                  if (m.user_id !== userId) return false;
+                  return params.length >= 2 ? m.character_id === "" || m.character_id === charId : true;
+                })
+                .sort((a, b) => b.id - a.id),
+            };
+          }
           throw new Error(`Unhandled SQL all: ${sql}`);
         },
         async first() {
@@ -190,6 +345,10 @@ function createMockD1() {
               .filter((m) => m.user_id === userId && !m.conversation_id)
               .sort((a, b) => a.id - b.id);
             return list[0] || null;
+          }
+          if (sql.includes("FROM messages WHERE id = ? AND user_id = ?")) {
+            const [id, userId] = params;
+            return messages.find((m) => m.id === id && m.user_id === userId) || null;
           }
           if (sql.includes("FROM conversations WHERE id = ? AND user_id = ?")) {
             const [id, userId] = params;
@@ -204,6 +363,28 @@ function createMockD1() {
           }
           if (sql.includes("FROM user_preferences WHERE user_id = ?")) {
             return userPreferences.get(params[0]) || null;
+          }
+          if (sql.includes("FROM characters WHERE id = ? AND user_id = ?")) {
+            const [id, userId] = params;
+            return characters.find((c) => c.id === id && c.user_id === userId) || null;
+          }
+          if (sql.includes("FROM characters WHERE user_id = ? LIMIT 1")) {
+            const [userId] = params;
+            return characters.find((c) => c.user_id === userId) || null;
+          }
+          if (sql.includes("FROM characters WHERE user_id = ? ORDER BY is_default DESC")) {
+            const [userId] = params;
+            const list = characters
+              .filter((c) => c.user_id === userId)
+              .sort((a, b) => b.is_default - a.is_default || b.updated_at - a.updated_at);
+            return list[0] || null;
+          }
+          if (sql.includes("FROM memories WHERE id = ? AND user_id = ?")) {
+            const [id, userId] = params;
+            return memories.find((m) => m.id === id && m.user_id === userId) || null;
+          }
+          if (sql.includes("FROM rate_limits WHERE bucket_key = ?")) {
+            return rateLimits.get(params[0]) || null;
           }
           return null;
         },
@@ -455,4 +636,103 @@ test("buildApiMessages sliding window and single-turn image strategy", () => {
   assert.equal(msgs[2].content, "a2");
   assert.ok(Array.isArray(msgs[3].content));
   assert.equal(msgs[3].content[1].image_url.url, "data:image/jpeg;base64,CURR3");
+});
+
+test("message edit and cascade rollback deleteMessagesFromId", async () => {
+  const db = createMockD1();
+  const conv = await createConversation(db, "alice", "回溯测试");
+  const m1 = await insertMessage(db, { userId: "alice", conversationId: conv.id, role: "user", content: "第一句" });
+  const m2 = await insertMessage(db, { userId: "alice", conversationId: conv.id, role: "assistant", content: "原始回复" });
+  const m3 = await insertMessage(db, { userId: "alice", conversationId: conv.id, role: "user", content: "后续追问" });
+
+  const edited = await updateMessageContent(db, "alice", m2.id, "修改后的回复");
+  assert.equal(edited?.content, "修改后的回复");
+
+  await deleteMessagesFromId(db, "alice", conv.id, m2.id);
+  const left = await listConversationMessages(db, "alice", conv.id);
+  assert.equal(left.length, 1);
+  assert.equal(left[0].id, m1.id);
+  assert.notEqual(left[0].id, m3.id);
+});
+
+test("characters, few-shot examples, memory book injection, and rate limit", async () => {
+  const db = createMockD1();
+  const config = loadConfig({
+    GEMINI_API_KEY: "g_key",
+    USER_PASSWORDS: "bob:1234",
+    DB: db,
+  });
+
+  const seeded = await listUserCharacters(db, "bob");
+  assert.equal(seeded.length, 3);
+
+  const customChar = await createCharacter(db, "bob", {
+    name: "咖啡师小陈",
+    avatar: "☕",
+    personality: "温和健谈",
+    catchphrase: "慢点喝",
+    background: "深夜咖啡馆主理人",
+    examples: "用户：好困\n咖啡师小陈：先来杯冰美式提神？|||顺便歇十分钟。",
+    first_message: "晚上好，老样子吗？",
+    is_default: true,
+  });
+  const updatedChar = await updateCharacter(db, "bob", customChar.id, { catchphrase: "慢慢来，先喝口水" });
+  assert.equal(updatedChar?.catchphrase, "慢慢来，先喝口水");
+
+  const mem1 = await createMemory(db, "bob", { characterId: "", content: "用户养了一只橘猫叫年糕" });
+  const mem2 = await createMemory(db, "bob", { characterId: customChar.id, content: "用户喜欢喝燕麦拿铁" });
+  await updateMemory(db, "bob", mem2.id, { enabled: false });
+
+  const parsed = parseExampleDialoguePairs(updatedChar.examples, updatedChar.name);
+  assert.equal(parsed.pairs.length, 2);
+
+  const bundle = buildEffectivePromptBundle({
+    character: updatedChar,
+    memories: [mem1, { ...mem2, enabled: false }],
+  });
+  assert.match(bundle.systemPrompt, /咖啡师小陈/);
+  assert.match(bundle.systemPrompt, /年糕/);
+  assert.doesNotMatch(bundle.systemPrompt, /燕麦拿铁/);
+
+  const conv = await createConversation(db, "bob", "新对话", customChar.id);
+  await insertMessage(db, { userId: "bob", conversationId: conv.id, role: "user", content: "今天喝啥" });
+
+  let capturedMessages = [];
+  const encoder = new TextEncoder();
+  const res = createChatSseResponse({
+    db,
+    config,
+    userId: "bob",
+    conversationId: conv.id,
+    fetchImpl: async (_, init) => {
+      capturedMessages = JSON.parse(init.body).messages;
+      return new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"（递上燕麦拿铁）喝这个吧"}}]}\n\n'));
+            c.enqueue(encoder.encode("data: [DONE]\n\n"));
+            c.close();
+          },
+        }),
+        { status: 200 },
+      );
+    },
+  });
+  await res.text();
+  assert.equal(capturedMessages[0].role, "system");
+  assert.match(capturedMessages[0].content, /年糕/);
+  assert.equal(capturedMessages[1].role, "user");
+  assert.equal(capturedMessages[1].content, "好困");
+  assert.equal(capturedMessages[2].role, "assistant");
+
+  await deleteMemory(db, "bob", mem1.id);
+  assert.equal((await listUserMemories(db, "bob", null)).length, 1);
+
+  const r1 = await checkRateLimit(db, "chat:bob", 2, 60);
+  const r2 = await checkRateLimit(db, "chat:bob", 2, 60);
+  const r3 = await checkRateLimit(db, "chat:bob", 2, 60);
+  assert.equal(r1.allowed, true);
+  assert.equal(r2.allowed, true);
+  assert.equal(r3.allowed, false);
+  assert.ok(r3.retryAfter >= 1);
 });

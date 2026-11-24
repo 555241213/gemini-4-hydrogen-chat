@@ -3,7 +3,10 @@ import { loadConfig } from "../_lib/config.js";
 import {
   createConversation,
   deleteConversation,
+  getCharacterById,
   getConversation,
+  getDefaultCharacter,
+  insertMessage,
   listUserConversations,
 } from "../_lib/db.js";
 
@@ -32,17 +35,46 @@ export async function onRequestPost({ request, env }) {
   }
 
   let title = "新对话";
+  let requestedCharId = "";
   try {
     const body = await request.json();
     if (body && typeof body.title === "string" && body.title.trim()) {
       title = body.title.trim().slice(0, 30);
     }
+    if (body && typeof body.character_id === "string" && body.character_id.trim()) {
+      requestedCharId = body.character_id.trim();
+    }
   } catch {
     // 允许空请求体新建默认对话
   }
 
-  const conversation = await createConversation(env.DB, user.userId, title);
-  return jsonResponse({ conversation }, 201);
+  let character = requestedCharId
+    ? await getCharacterById(env.DB, user.userId, requestedCharId)
+    : await getDefaultCharacter(env.DB, user.userId);
+  if (requestedCharId && !character) {
+    character = await getDefaultCharacter(env.DB, user.userId);
+  }
+
+  const conversation = await createConversation(
+    env.DB,
+    user.userId,
+    title,
+    character ? character.id : null,
+  );
+
+  const messages = [];
+  if (character && character.first_message && character.first_message.trim()) {
+    const firstMsg = await insertMessage(env.DB, {
+      userId: user.userId,
+      conversationId: conversation.id,
+      role: "assistant",
+      content: character.first_message.trim(),
+      imageData: null,
+    });
+    messages.push(firstMsg);
+  }
+
+  return jsonResponse({ conversation, character, messages }, 201);
 }
 
 export async function onRequestDelete({ request, env }) {

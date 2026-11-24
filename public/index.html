@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>星芒 AI · 日常聊天</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='2' y1='2' x2='22' y2='22' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%23818CF8'/%3E%3Cstop offset='1' stop-color='%2338BDF8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M12 1.5L14.45 9.55L22.5 12L14.45 14.45L12 22.5L9.55 14.45L1.5 12L9.55 9.55L12 1.5Z' fill='url(%23g)'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="/styles.css?v=20261124e" />
+  <link rel="stylesheet" href="/styles.css?v=20261124f" />
 </head>
 <body>
   <div class="ambient-bg" aria-hidden="true"></div>
@@ -67,9 +67,22 @@
             <line x1="5" y1="12" x2="19" y2="12"></line>
           </svg>
         </button>
-        <button type="button" id="persona-btn" class="icon-btn" title="我的 AI 人设" aria-label="我的 AI 人设">
+        <button type="button" id="persona-btn" class="icon-btn" title="角色管理与切换" aria-label="角色管理与切换">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8L12 2z"></path>
+          </svg>
+        </button>
+        <button type="button" id="memories-btn" class="icon-btn" title="长期记忆本" aria-label="长期记忆本">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+          </svg>
+        </button>
+        <button type="button" id="bg-btn" class="icon-btn" title="更换聊天背景" aria-label="更换聊天背景">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <polyline points="21 15 16 10 5 21"></polyline>
           </svg>
         </button>
         <button type="button" id="theme-toggle-btn" class="icon-btn" title="切换浅色/深色模式" aria-label="切换主题">
@@ -104,10 +117,10 @@
       <div id="chat-stage" class="chat-stage">
         <div id="welcome-hero" class="welcome-hero hidden">
           <div class="welcome-badge">
-            <span class="starburst-icon"></span>
+            <span id="welcome-char-avatar" class="starburst-icon"></span>
           </div>
-          <h1 class="welcome-title">嗨，今天想聊点什么？</h1>
-          <p class="welcome-subtitle">日常聊天、随手提问，或者直接发张照片让我看看</p>
+          <h1 id="welcome-char-name" class="welcome-title">嗨，今天想聊点什么？</h1>
+          <p id="welcome-char-subtitle" class="welcome-subtitle">日常聊天、随手提问，或者直接发张照片让我看看</p>
         </div>
 
         <div id="messages-list" class="messages-list"></div>
@@ -184,37 +197,138 @@
     </aside>
   </div>
 
-  <!-- 用户个人 AI 人设弹窗 -->
+  <!-- 角色系统与切换弹窗 -->
   <div id="persona-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="user-persona-title">
-    <div class="glass-card admin-card" style="max-width: 520px;">
+    <div class="glass-card admin-card" style="max-width: 640px;">
       <div class="admin-header">
         <div>
-          <h2 id="user-persona-title" class="admin-title">✦ 我的 AI 人设</h2>
-          <p id="user-persona-status" class="admin-subtitle">当前状态：沿用站点默认人设</p>
+          <h2 id="user-persona-title" class="admin-title">✦ 角色与人设广场</h2>
+          <p id="user-persona-status" class="admin-subtitle">支持多角色切换、开场白冷启动与自定义编辑</p>
         </div>
         <button type="button" id="user-persona-close-btn" class="icon-btn" aria-label="关闭">×</button>
       </div>
 
-      <div class="admin-panel">
-        <div class="persona-chips">
-          <button type="button" class="glass-action-btn user-persona-chip" data-persona="humor">幽默损友搭子</button>
-          <button type="button" class="glass-action-btn user-persona-chip" data-persona="gentle">温柔倾听治愈</button>
-          <button type="button" class="glass-action-btn user-persona-chip" data-persona="concise">极简百科直答</button>
+      <!-- 视图 A：角色列表 -->
+      <div id="char-list-view" class="admin-panel">
+        <div class="char-toolbar">
+          <span class="admin-section-label" style="margin: 0;">点击「用它新开对话」立即触发开场白</span>
+          <button type="button" id="char-create-btn" class="primary-btn" style="padding: 8px 14px; font-size: 0.84rem;">＋ 新建角色</button>
+        </div>
+        <div id="char-list-grid" class="char-list-grid"></div>
+        <div id="char-list-msg" class="admin-msg hidden"></div>
+      </div>
+
+      <!-- 视图 B：角色表单编辑器 -->
+      <form id="char-editor-view" class="admin-panel hidden">
+        <div class="admin-grid">
+          <div class="field-group">
+            <label for="char-avatar-input">头像（Emoji / 符号）</label>
+            <input id="char-avatar-input" type="text" maxlength="12" placeholder="如：🌙 / 🍊 / ✦" required />
+          </div>
+          <div class="field-group">
+            <label for="char-name-input">角色昵称</label>
+            <input id="char-name-input" type="text" maxlength="30" placeholder="例如：林屿" required />
+          </div>
         </div>
         <div class="field-group">
-          <label for="user-persona-input">自定义人设（留空保存即自动使用管理员设定的人设）</label>
-          <textarea
-            id="user-persona-input"
-            class="glass-textarea"
-            rows="6"
-            maxlength="4000"
-            placeholder="留空则使用管理员设定的默认人设；填入后仅对你自己的账号生效（最多 4,000 字）..."
-          ></textarea>
+          <label for="char-personality-input">性格特点</label>
+          <textarea id="char-personality-input" class="glass-textarea" rows="2" maxlength="2000" placeholder="描述角色的核心性格、脾气与相处方式..."></textarea>
         </div>
-        <div id="user-persona-msg" class="admin-msg hidden"></div>
+        <div class="field-group">
+          <label for="char-catchphrase-input">口癖与说话风格</label>
+          <textarea id="char-catchphrase-input" class="glass-textarea" rows="2" maxlength="2000" placeholder="常用口头禅、语气词、是否分条发消息或带动作描写..."></textarea>
+        </div>
+        <div class="field-group">
+          <label for="char-background-input">背景设定</label>
+          <textarea id="char-background-input" class="glass-textarea" rows="2" maxlength="2000" placeholder="角色是谁、与你是什么关系、生活背景..."></textarea>
+        </div>
+        <div class="field-group">
+          <label for="char-examples-input">对话示例（Few-shot，建议按“用户：… / 角色名：…”换行书写）</label>
+          <textarea id="char-examples-input" class="glass-textarea" rows="3" maxlength="2000" placeholder="用户：今天好累&#10;角色：（递来温水）辛苦啦，先歇一会儿吧。|||想聊聊发生了什么吗？"></textarea>
+        </div>
+        <div class="field-group">
+          <label for="char-first-msg-input">开场白（first_message，可用 ||| 分成多条气泡）</label>
+          <textarea id="char-first-msg-input" class="glass-textarea" rows="2" maxlength="2000" placeholder="新建对话时角色主动发出的第一句话..."></textarea>
+        </div>
+        <label class="inline-check-row">
+          <input type="checkbox" id="char-default-check" />
+          <span>设为默认角色（新建空白对话时自动启用）</span>
+        </label>
+        <div id="char-editor-msg" class="admin-msg hidden"></div>
         <div class="admin-footer">
-          <button type="button" id="user-persona-clear-btn" class="glass-action-btn admin-btn-lg">用回默认人设</button>
-          <button type="button" id="user-persona-save-btn" class="primary-btn admin-save-btn">保存我的人设</button>
+          <button type="button" id="char-cancel-edit-btn" class="glass-action-btn admin-btn-lg">返回列表</button>
+          <button type="submit" id="char-save-btn" class="primary-btn admin-save-btn">保存角色</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 长期记忆本弹窗 -->
+  <div id="memories-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="memories-title">
+    <div class="glass-card admin-card" style="max-width: 620px;">
+      <div class="admin-header">
+        <div>
+          <h2 id="memories-title" class="admin-title">📒 长期记忆本</h2>
+          <p class="admin-subtitle">已启用的记忆会自动注入系统提示词，让 AI 长期记住重要事实</p>
+        </div>
+        <button type="button" id="memories-close-btn" class="icon-btn" aria-label="关闭">×</button>
+      </div>
+
+      <div class="admin-panel">
+        <div class="mem-top-bar">
+          <div class="persona-chips" style="margin: 0;">
+            <button type="button" class="glass-action-btn mem-filter-btn active" data-filter="all">全部</button>
+            <button type="button" class="glass-action-btn mem-filter-btn" data-filter="global">通用</button>
+            <button type="button" class="glass-action-btn mem-filter-btn" data-filter="character">当前角色</button>
+          </div>
+          <button type="button" id="mem-extract-btn" class="glass-action-btn">✨ 从当前对话提炼</button>
+        </div>
+
+        <label class="inline-check-row">
+          <input type="checkbox" id="mem-auto-extract-check" />
+          <span>自动记忆提取（每 6 轮对话后后台静默提炼一次新事实）</span>
+        </label>
+
+        <form id="mem-add-form" class="mem-add-form">
+          <input id="mem-new-input" type="text" maxlength="300" placeholder="手动记一条事实（如：我养了一只叫年糕的橘猫）" required />
+          <select id="mem-scope-select">
+            <option value="">通用记忆</option>
+            <option value="__current__">当前角色专属</option>
+          </select>
+          <button type="submit" class="primary-btn adm-add-btn">添加</button>
+        </form>
+
+        <div id="mem-msg" class="admin-msg hidden"></div>
+        <div id="mem-list" class="mem-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 氛围感聊天背景弹窗 -->
+  <div id="bg-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="bg-title">
+    <div class="glass-card admin-card" style="max-width: 520px;">
+      <div class="admin-header">
+        <div>
+          <h2 id="bg-title" class="admin-title">🎨 聊天氛围背景</h2>
+          <p class="admin-subtitle">切换沉浸式环境光晕或上传自己的壁纸</p>
+        </div>
+        <button type="button" id="bg-close-btn" class="icon-btn" aria-label="关闭">×</button>
+      </div>
+
+      <div class="admin-panel">
+        <div id="bg-preset-grid" class="bg-preset-grid"></div>
+        <div class="field-group">
+          <label for="bg-url-input">自定义背景图片（上传本地图片或输入图片 URL）</label>
+          <div class="bg-custom-row">
+            <input id="bg-url-input" type="url" placeholder="https://... 或点击右侧上传本地图片" />
+            <input id="bg-file-input" type="file" accept="image/png,image/jpeg,image/webp" class="hidden" />
+            <button type="button" id="bg-upload-btn" class="glass-action-btn">上传图片</button>
+            <button type="button" id="bg-clear-custom-btn" class="glass-action-btn">清除壁纸</button>
+          </div>
+        </div>
+        <div class="field-group">
+          <label for="bg-dim-range">背景暗化遮罩强度（确保文字清晰）</label>
+          <input id="bg-dim-range" type="range" min="20" max="88" step="2" value="56" />
         </div>
       </div>
     </div>
@@ -360,7 +474,7 @@
     <img id="lightbox-img" class="lightbox-img" alt="图片大图预览" />
   </div>
 
-  <script src="/markdown.js?v=20261124e"></script>
-  <script src="/app.js?v=20261124e"></script>
+  <script src="/markdown.js?v=20261124f"></script>
+  <script src="/app.js?v=20261124f"></script>
 </body>
 </html>

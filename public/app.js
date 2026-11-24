@@ -9,6 +9,8 @@
   const JPEG_QUALITY = 0.8;
   const MAX_DATA_URL_LEN = 650000;
   const THEME_STORAGE_KEY = "xingmang_theme";
+  const BG_STORAGE_KEY = "xingmang_bg_config";
+  const AUTO_EXTRACT_KEY = "xingmang_auto_extract";
 
   const state = {
     user: null,
@@ -17,6 +19,12 @@
     conversations: [],
     currentConversationId: null,
     messages: [],
+    characters: [],
+    activeCharacterId: null,
+    memories: [],
+    memoryFilter: "all",
+    editingCharacterId: null,
+    userTurnCounter: 0,
     isStreaming: false,
     selectedFile: null,
     selectedPreviewUrl: null,
@@ -39,14 +47,20 @@
   const navUserPill = document.getElementById("nav-user-pill");
   const newChatBtn = document.getElementById("new-chat-btn");
   const personaBtn = document.getElementById("persona-btn");
+  const memoriesBtn = document.getElementById("memories-btn");
+  const bgBtn = document.getElementById("bg-btn");
   const themeToggleBtn = document.getElementById("theme-toggle-btn");
   const themeIcon = document.getElementById("theme-icon");
   const clearBtn = document.getElementById("clear-btn");
   const adminBtn = document.getElementById("admin-btn");
   const logoutBtn = document.getElementById("logout-btn");
 
+  const ambientBgEl = document.querySelector(".ambient-bg");
   const chatScrollArea = document.getElementById("chat-scroll-area");
   const welcomeHero = document.getElementById("welcome-hero");
+  const welcomeCharAvatar = document.getElementById("welcome-char-avatar");
+  const welcomeCharName = document.getElementById("welcome-char-name");
+  const welcomeCharSubtitle = document.getElementById("welcome-char-subtitle");
   const messagesList = document.getElementById("messages-list");
   const chatErrorBox = document.getElementById("chat-error-box");
   const chatErrorText = document.getElementById("chat-error-text");
@@ -104,20 +118,56 @@
   const admNewPwd = document.getElementById("adm-new-pwd");
   const admUserMsg = document.getElementById("adm-user-msg");
 
-  // 用户个人人设弹窗
+  // 角色系统与切换弹窗
   const personaModal = document.getElementById("persona-modal");
   const userPersonaCloseBtn = document.getElementById("user-persona-close-btn");
   const userPersonaStatus = document.getElementById("user-persona-status");
-  const userPersonaInput = document.getElementById("user-persona-input");
-  const userPersonaMsg = document.getElementById("user-persona-msg");
-  const userPersonaClearBtn = document.getElementById("user-persona-clear-btn");
-  const userPersonaSaveBtn = document.getElementById("user-persona-save-btn");
-  const userPersonaChips = personaModal.querySelectorAll(".user-persona-chip");
+  const charListView = document.getElementById("char-list-view");
+  const charListGrid = document.getElementById("char-list-grid");
+  const charListMsg = document.getElementById("char-list-msg");
+  const charCreateBtn = document.getElementById("char-create-btn");
+  const charEditorView = document.getElementById("char-editor-view");
+  const charAvatarInput = document.getElementById("char-avatar-input");
+  const charNameInput = document.getElementById("char-name-input");
+  const charPersonalityInput = document.getElementById("char-personality-input");
+  const charCatchphraseInput = document.getElementById("char-catchphrase-input");
+  const charBackgroundInput = document.getElementById("char-background-input");
+  const charExamplesInput = document.getElementById("char-examples-input");
+  const charFirstMsgInput = document.getElementById("char-first-msg-input");
+  const charDefaultCheck = document.getElementById("char-default-check");
+  const charEditorMsg = document.getElementById("char-editor-msg");
+  const charCancelEditBtn = document.getElementById("char-cancel-edit-btn");
+  const charSaveBtn = document.getElementById("char-save-btn");
+
+  // 长期记忆本弹窗
+  const memoriesModal = document.getElementById("memories-modal");
+  const memoriesCloseBtn = document.getElementById("memories-close-btn");
+  const memFilterBtns = memoriesModal.querySelectorAll(".mem-filter-btn");
+  const memExtractBtn = document.getElementById("mem-extract-btn");
+  const memAutoExtractCheck = document.getElementById("mem-auto-extract-check");
+  const memAddForm = document.getElementById("mem-add-form");
+  const memNewInput = document.getElementById("mem-new-input");
+  const memScopeSelect = document.getElementById("mem-scope-select");
+  const memMsg = document.getElementById("mem-msg");
+  const memList = document.getElementById("mem-list");
+
+  // 氛围背景弹窗
+  const bgModal = document.getElementById("bg-modal");
+  const bgCloseBtn = document.getElementById("bg-close-btn");
+  const bgPresetGrid = document.getElementById("bg-preset-grid");
+  const bgUrlInput = document.getElementById("bg-url-input");
+  const bgFileInput = document.getElementById("bg-file-input");
+  const bgUploadBtn = document.getElementById("bg-upload-btn");
+  const bgClearCustomBtn = document.getElementById("bg-clear-custom-btn");
+  const bgDimRange = document.getElementById("bg-dim-range");
 
   // 确认与图片放大弹窗
   const confirmModal = document.getElementById("confirm-modal");
+  const confirmTitleEl = document.getElementById("confirm-title");
+  const confirmDescEl = confirmModal.querySelector(".confirm-desc");
   const confirmCancelBtn = document.getElementById("confirm-cancel-btn");
   const confirmOkBtn = document.getElementById("confirm-ok-btn");
+  let pendingConfirmHandler = null;
   const lightboxModal = document.getElementById("lightbox-modal");
   const lightboxImg = document.getElementById("lightbox-img");
 
@@ -182,6 +232,8 @@
     appView.classList.add("hidden");
     drawerBackdrop.classList.add("hidden");
     personaModal.classList.add("hidden");
+    memoriesModal.classList.add("hidden");
+    bgModal.classList.add("hidden");
     adminModal.classList.add("hidden");
     if (!state.configured) {
       const missingText = state.missingConfig.length
@@ -214,6 +266,8 @@
     newChatBtn.disabled = busy;
     drawerNewChatBtn.disabled = busy;
     personaBtn.disabled = busy;
+    memoriesBtn.disabled = busy;
+    bgBtn.disabled = busy;
     themeToggleBtn.disabled = busy;
     clearBtn.disabled = busy || state.messages.length === 0;
     adminBtn.disabled = busy;
@@ -344,29 +398,32 @@
     const data = await res.json();
     state.currentConversationId = data.conversation_id;
     state.messages = data.messages || [];
+    const conv = state.conversations.find(function (c) {
+      return c.id === state.currentConversationId;
+    });
+    if (conv && conv.character_id) {
+      state.activeCharacterId = conv.character_id;
+    }
+    updateWelcomeHero();
     setChatError(null);
     renderMessages();
     renderConversationsDrawer();
     scrollToBottom(false);
   }
 
-  async function handleNewChat() {
+  async function startNewChatWithCharacter(charId, focusComposer) {
     if (state.isStreaming) return;
     drawerBackdrop.classList.add("hidden");
-    // 如果当前本来就是空的新对话，只聚焦输入框即可，不产生无意义的空记录
-    if (state.messages.length === 0) {
-      state.currentConversationId = null;
-      setChatError(null);
-      renderConversationsDrawer();
-      promptInput.focus();
-      return;
+    const targetCharId = charId || (getActiveCharacter() && getActiveCharacter().id) || null;
+    if (targetCharId) {
+      state.activeCharacterId = targetCharId;
     }
 
     try {
       const res = await fetch("/api/conversations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "新对话" }),
+        body: JSON.stringify({ title: "新对话", character_id: targetCharId }),
       });
       if (res.status === 401) {
         state.user = null;
@@ -377,13 +434,30 @@
       if (data.conversation) {
         state.conversations.unshift(data.conversation);
         state.currentConversationId = data.conversation.id;
-        state.messages = [];
+        state.messages = Array.isArray(data.messages) ? data.messages : [];
+        updateWelcomeHero();
         setChatError(null);
         renderMessages();
         renderConversationsDrawer();
-        promptInput.focus();
+        if (focusComposer !== false) promptInput.focus();
       }
     } catch (_) {}
+  }
+
+  async function handleNewChat() {
+    if (state.isStreaming) return;
+    drawerBackdrop.classList.add("hidden");
+    const activeChar = getActiveCharacter();
+    const hasFirstMsg = Boolean(activeChar && activeChar.first_message);
+    if (state.messages.length === 0 && !hasFirstMsg) {
+      state.currentConversationId = null;
+      setChatError(null);
+      updateWelcomeHero();
+      renderConversationsDrawer();
+      promptInput.focus();
+      return;
+    }
+    await startNewChatWithCharacter(activeChar ? activeChar.id : null, true);
   }
 
   async function deleteConversationById(conversationId) {
@@ -407,8 +481,153 @@
   }
 
   // --------------------------------------------------------------------------
-  // 消息渲染
+  // 拟人化消息分割、确认弹窗与消息渲染
   // --------------------------------------------------------------------------
+
+  function getActiveCharacter() {
+    const conv = state.conversations.find(function (c) {
+      return c.id === state.currentConversationId;
+    });
+    const targetId = (conv && conv.character_id) || state.activeCharacterId;
+    if (targetId) {
+      const matched = state.characters.find(function (ch) {
+        return ch.id === targetId;
+      });
+      if (matched) return matched;
+    }
+    return (
+      state.characters.find(function (ch) {
+        return ch.is_default;
+      }) ||
+      state.characters[0] ||
+      null
+    );
+  }
+
+  function getActiveCharacterMeta() {
+    const ch = getActiveCharacter();
+    if (!ch) return { name: "星芒 AI", avatar: "✦" };
+    return { name: ch.name || "星芒 AI", avatar: ch.avatar || "✦" };
+  }
+
+  function updateWelcomeHero() {
+    const ch = getActiveCharacter();
+    if (!ch) {
+      welcomeCharAvatar.className = "starburst-icon";
+      welcomeCharAvatar.textContent = "";
+      welcomeCharName.textContent = "嗨，今天想聊点什么？";
+      welcomeCharSubtitle.textContent = "日常聊天、随手提问，或者直接发张照片让我看看";
+      return;
+    }
+    if (!ch.avatar || ch.avatar === "✦") {
+      welcomeCharAvatar.className = "starburst-icon";
+      welcomeCharAvatar.textContent = "";
+    } else {
+      welcomeCharAvatar.className = "char-emoji-icon";
+      welcomeCharAvatar.textContent = ch.avatar;
+    }
+    welcomeCharName.textContent = ch.name;
+    welcomeCharSubtitle.textContent =
+      ch.personality || ch.background || "日常聊天、随手提问，或者直接发张照片让我看看";
+  }
+
+  /**
+   * 按 ||| 将普通对话拆分为多条气泡（跳过围栏代码块内部，避免破坏代码）。
+   */
+  function splitReplySegments(rawText, keepTrailingEmpty) {
+    const source = String(rawText || "").replace(/\r\n?/g, "\n");
+    if (!source) return keepTrailingEmpty ? [""] : [];
+
+    const segments = [];
+    let current = "";
+    let inFence = false;
+    const lines = source.split("\n");
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence;
+      }
+      if (!inFence && line.includes("|||")) {
+        const parts = line.split("|||");
+        for (let j = 0; j < parts.length; j += 1) {
+          current += (current && j === 0 ? "\n" : "") + parts[j];
+          if (j < parts.length - 1) {
+            segments.push(current.trim());
+            current = "";
+          }
+        }
+      } else {
+        current += (current ? "\n" : "") + line;
+      }
+    }
+
+    const tail = current.trim();
+    if (tail || keepTrailingEmpty) {
+      segments.push(tail);
+    }
+    return segments.filter(function (seg, idx) {
+      return Boolean(seg) || (keepTrailingEmpty && idx === segments.length - 1);
+    });
+  }
+
+  function openConfirmDialog(opts) {
+    confirmTitleEl.textContent = opts.title || "确认操作？";
+    confirmDescEl.textContent = opts.desc || "";
+    confirmOkBtn.textContent = opts.okText || "确认";
+    pendingConfirmHandler = typeof opts.onConfirm === "function" ? opts.onConfirm : null;
+    confirmModal.classList.remove("hidden");
+  }
+
+  async function handleRollbackFromMessage(msgId) {
+    if (state.isStreaming || !state.currentConversationId || !msgId) return;
+    openConfirmDialog({
+      title: "删除并回溯到此处？",
+      desc: "这会删除该条消息以及它之后的所有对话记录，方便你重新接着聊或修改提问，且无法恢复。",
+      okText: "确认删除并回溯",
+      onConfirm: async function () {
+        try {
+          const url =
+            "/api/messages?conversation_id=" +
+            encodeURIComponent(state.currentConversationId) +
+            "&from_id=" +
+            encodeURIComponent(msgId);
+          const res = await fetch(url, { method: "DELETE" });
+          if (res.status === 401) {
+            state.user = null;
+            showAuthView();
+            return;
+          }
+          if (!res.ok) {
+            const err = await res.json().catch(function () { return {}; });
+            setChatError(err.detail || "回溯删除失败，请稍后重试。");
+            return;
+          }
+          const idx = state.messages.findIndex(function (m) {
+            return m.id === msgId;
+          });
+          if (idx >= 0) {
+            state.messages = state.messages.slice(0, idx);
+          }
+          setChatError(null);
+          renderMessages();
+          await refreshConversations();
+        } catch (_) {
+          setChatError("回溯删除时网络异常，请重试。");
+        }
+      },
+    });
+  }
+
+  function renderAvatarBadge(avatarText) {
+    if (!avatarText || avatarText === "✦") {
+      return '<span class="starburst-icon"></span>';
+    }
+    const span = document.createElement("span");
+    span.className = "ai-avatar-badge";
+    span.textContent = avatarText;
+    return span.outerHTML;
+  }
 
   function createUserMessageElement(msg) {
     const row = document.createElement("div");
@@ -442,24 +661,51 @@
     }
 
     row.appendChild(bubble);
+
+    if (msg.id) {
+      const userActions = document.createElement("div");
+      userActions.className = "user-msg-actions";
+      const rollbackBtn = document.createElement("button");
+      rollbackBtn.type = "button";
+      rollbackBtn.className = "glass-action-btn";
+      rollbackBtn.textContent = "🗑 回溯删除";
+      rollbackBtn.disabled = state.isStreaming;
+      rollbackBtn.addEventListener("click", function () {
+        handleRollbackFromMessage(msg.id);
+      });
+      userActions.appendChild(rollbackBtn);
+      row.appendChild(userActions);
+    }
+
     return row;
   }
 
   function createAssistantMessageElement(msg, isLastAssistant) {
     const row = document.createElement("div");
     row.className = "assistant-msg-row";
+    const meta = getActiveCharacterMeta();
 
     const header = document.createElement("div");
     header.className = "ai-header";
-    header.innerHTML =
-      '<span class="starburst-icon"></span>' +
-      '<span class="ai-header-label">星芒 AI</span>';
+    const labelSpan = document.createElement("span");
+    labelSpan.className = "ai-header-label";
+    labelSpan.textContent = meta.name;
+    header.innerHTML = renderAvatarBadge(meta.avatar);
+    header.appendChild(labelSpan);
     row.appendChild(header);
 
-    const body = document.createElement("div");
-    body.className = "ai-content";
-    body.innerHTML = window.XingmangMarkdown.render(msg.content || "");
-    row.appendChild(body);
+    const stack = document.createElement("div");
+    stack.className = "assistant-bubbles-stack";
+    const segments = splitReplySegments(msg.content || "", false);
+    const renderParts = segments.length ? segments : [msg.content || ""];
+
+    renderParts.forEach(function (part) {
+      const bubbleItem = document.createElement("div");
+      bubbleItem.className = "assistant-bubble-item ai-content";
+      bubbleItem.innerHTML = window.XingmangMarkdown.render(part);
+      stack.appendChild(bubbleItem);
+    });
+    row.appendChild(stack);
 
     const actions = document.createElement("div");
     actions.className = "msg-actions";
@@ -469,7 +715,8 @@
     copyBtn.className = "glass-action-btn";
     copyBtn.innerHTML = "<span>📋</span><span>复制</span>";
     copyBtn.addEventListener("click", async function () {
-      const ok = await copyText(msg.content || "");
+      const plain = renderParts.join("\n\n");
+      const ok = await copyText(plain);
       if (ok) {
         copyBtn.classList.add("copied");
         copyBtn.innerHTML = "<span>✓</span><span>已复制</span>";
@@ -480,6 +727,92 @@
       }
     });
     actions.appendChild(copyBtn);
+
+    if (msg.id) {
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "glass-action-btn";
+      editBtn.textContent = "✎ 编辑";
+      editBtn.disabled = state.isStreaming;
+      editBtn.addEventListener("click", function () {
+        if (state.isStreaming || row.querySelector(".msg-edit-box")) return;
+        stack.classList.add("hidden");
+        actions.classList.add("hidden");
+
+        const editBox = document.createElement("div");
+        editBox.className = "msg-edit-box";
+        const ta = document.createElement("textarea");
+        ta.className = "glass-textarea";
+        ta.rows = Math.min(10, Math.max(3, String(msg.content || "").split("\n").length + 1));
+        ta.value = msg.content || "";
+
+        const btnRow = document.createElement("div");
+        btnRow.className = "msg-edit-actions";
+        const cancelEditBtn = document.createElement("button");
+        cancelEditBtn.type = "button";
+        cancelEditBtn.className = "glass-action-btn";
+        cancelEditBtn.textContent = "取消";
+        const saveEditBtn = document.createElement("button");
+        saveEditBtn.type = "button";
+        saveEditBtn.className = "primary-btn";
+        saveEditBtn.style.padding = "6px 14px";
+        saveEditBtn.style.fontSize = "0.82rem";
+        saveEditBtn.textContent = "保存修改";
+
+        cancelEditBtn.addEventListener("click", function () {
+          editBox.remove();
+          stack.classList.remove("hidden");
+          actions.classList.remove("hidden");
+        });
+
+        saveEditBtn.addEventListener("click", async function () {
+          const nextContent = ta.value.trim();
+          if (!nextContent) return;
+          saveEditBtn.disabled = true;
+          try {
+            const res = await fetch("/api/messages", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ message_id: msg.id, content: nextContent }),
+            });
+            if (res.status === 401) {
+              state.user = null;
+              showAuthView();
+              return;
+            }
+            const data = await res.json().catch(function () { return {}; });
+            if (!res.ok) {
+              setChatError(data.detail || "保存修改失败。");
+              return;
+            }
+            msg.content = (data.message && data.message.content) || nextContent;
+            renderMessages();
+          } catch (_) {
+            setChatError("保存修改时网络异常。");
+          } finally {
+            saveEditBtn.disabled = false;
+          }
+        });
+
+        btnRow.appendChild(cancelEditBtn);
+        btnRow.appendChild(saveEditBtn);
+        editBox.appendChild(ta);
+        editBox.appendChild(btnRow);
+        row.appendChild(editBox);
+        ta.focus();
+      });
+      actions.appendChild(editBtn);
+
+      const rollbackBtn = document.createElement("button");
+      rollbackBtn.type = "button";
+      rollbackBtn.className = "glass-action-btn";
+      rollbackBtn.textContent = "🗑 回溯删除";
+      rollbackBtn.disabled = state.isStreaming;
+      rollbackBtn.addEventListener("click", function () {
+        handleRollbackFromMessage(msg.id);
+      });
+      actions.appendChild(rollbackBtn);
+    }
 
     if (isLastAssistant) {
       const regenBtn = document.createElement("button");
@@ -684,29 +1017,92 @@
     }
   }
 
+  function createTypingBubbleElement() {
+    const el = document.createElement("div");
+    el.className = "typing-bubble";
+    el.innerHTML =
+      '<span class="typing-dots"><span></span><span></span><span></span></span>' +
+      '<span>对方正在输入…</span>';
+    return el;
+  }
+
   function createStreamingAssistantNode() {
     const row = document.createElement("div");
     row.className = "assistant-msg-row";
+    const meta = getActiveCharacterMeta();
 
     const header = document.createElement("div");
     header.className = "ai-header";
-    header.innerHTML =
-      '<span class="starburst-icon"></span>' +
-      '<span class="ai-header-label">星芒 AI</span>';
+    const labelSpan = document.createElement("span");
+    labelSpan.className = "ai-header-label";
+    labelSpan.textContent = meta.name;
+    header.innerHTML = renderAvatarBadge(meta.avatar);
+    header.appendChild(labelSpan);
 
-    const pulse = document.createElement("div");
-    pulse.className = "thinking-pulse";
-    pulse.textContent = "✦ 正在回复中...";
+    const stack = document.createElement("div");
+    stack.className = "assistant-bubbles-stack";
 
-    const contentEl = document.createElement("div");
-    contentEl.className = "ai-content";
+    const typing = createTypingBubbleElement();
 
     row.appendChild(header);
-    row.appendChild(pulse);
-    row.appendChild(contentEl);
+    row.appendChild(stack);
+    row.appendChild(typing);
     messagesList.appendChild(row);
 
-    return { row: row, pulse: pulse, contentEl: contentEl };
+    return { row: row, stack: stack, typing: typing };
+  }
+
+  function renderStreamingBubbles(streamNode, accumulated, isFinal) {
+    const parts = splitReplySegments(accumulated, true);
+    const activeText = parts.length ? parts[parts.length - 1] : "";
+    const completed = parts.slice(0, Math.max(0, parts.length - 1));
+
+    streamNode.stack.innerHTML = "";
+    completed.forEach(function (seg) {
+      if (!seg) return;
+      const item = document.createElement("div");
+      item.className = "assistant-bubble-item ai-content";
+      item.innerHTML = window.XingmangMarkdown.render(seg);
+      streamNode.stack.appendChild(item);
+    });
+
+    if (activeText) {
+      const activeItem = document.createElement("div");
+      activeItem.className = "assistant-bubble-item ai-content";
+      activeItem.innerHTML =
+        window.XingmangMarkdown.render(activeText) +
+        (isFinal ? "" : '<span class="stream-cursor">▌</span>');
+      streamNode.stack.appendChild(activeItem);
+      streamNode.typing.classList.add("hidden");
+    } else if (!isFinal) {
+      streamNode.typing.classList.remove("hidden");
+    } else {
+      streamNode.typing.classList.add("hidden");
+    }
+  }
+
+  async function playSequentialRevealIfFast(streamNode, fullText, streamStartTs) {
+    const parts = splitReplySegments(fullText, false);
+    if (parts.length <= 1) return;
+    // 若流式总耗时极短（例如短气泡一次性推送完成），补一段轻快自然的逐条弹出节奏
+    if (Date.now() - streamStartTs > 1200) return;
+
+    streamNode.stack.innerHTML = "";
+    for (let i = 0; i < parts.length; i += 1) {
+      if (i > 0) {
+        streamNode.typing.classList.remove("hidden");
+        if (!state.userScrolledUp) scrollToBottom(false);
+        await new Promise(function (resolve) {
+          setTimeout(resolve, 420);
+        });
+      }
+      streamNode.typing.classList.add("hidden");
+      const item = document.createElement("div");
+      item.className = "assistant-bubble-item ai-content";
+      item.innerHTML = window.XingmangMarkdown.render(parts[i]);
+      streamNode.stack.appendChild(item);
+      if (!state.userScrolledUp) scrollToBottom(false);
+    }
   }
 
   async function runStreamRequest(fetchPromise) {
@@ -717,9 +1113,10 @@
     welcomeHero.classList.add("hidden");
 
     const streamNode = createStreamingAssistantNode();
+    const streamStartTs = Date.now();
     let accumulated = "";
-    let firstChunk = false;
     let streamSucceeded = false;
+    let doneMsg = null;
 
     if (!state.userScrolledUp) {
       scrollToBottom(false);
@@ -755,24 +1152,24 @@
         },
         onDelta: function (piece) {
           if (!piece) return;
-          if (!firstChunk) {
-            firstChunk = true;
-            streamNode.pulse.remove();
-          }
           accumulated += piece;
-          streamNode.contentEl.innerHTML =
-            window.XingmangMarkdown.render(accumulated) +
-            '<span class="stream-cursor">▌</span>';
+          renderStreamingBubbles(streamNode, accumulated, false);
           if (!state.userScrolledUp) scrollToBottom(false);
         },
         onDone: function (assistantMsg) {
           streamSucceeded = true;
+          doneMsg = assistantMsg;
           state.messages.push(assistantMsg);
         },
         onError: function (errText) {
           setChatError(errText);
         },
       });
+
+      if (streamSucceeded && doneMsg && doneMsg.content) {
+        await playSequentialRevealIfFast(streamNode, doneMsg.content, streamStartTs);
+        maybeTriggerAutoMemoryExtract();
+      }
 
       if (!streamSucceeded && !state.lastError) {
         setChatError("⚠️ 连接提前中断，请点击下方重试。");
@@ -860,12 +1257,14 @@
     resizeTextarea();
     clearSelectedImage();
 
+    const activeChar = getActiveCharacter();
     await runStreamRequest(
       fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversation_id: state.currentConversationId,
+          character_id: activeChar ? activeChar.id : null,
           content: text,
           image_data_url: imageDataUrl,
         }),
@@ -1101,21 +1500,48 @@
   // 登录与初始化引导
   // --------------------------------------------------------------------------
 
+  async function refreshCharacters() {
+    const res = await fetch("/api/characters");
+    if (res.status === 401) {
+      state.user = null;
+      showAuthView();
+      return false;
+    }
+    if (!res.ok) return false;
+    const data = await res.json();
+    state.characters = Array.isArray(data.characters) ? data.characters : [];
+    if (!state.activeCharacterId && state.characters.length) {
+      const def =
+        state.characters.find(function (c) { return c.is_default; }) || state.characters[0];
+      state.activeCharacterId = def.id;
+    }
+    updateWelcomeHero();
+    return true;
+  }
+
   async function enterChatSession() {
+    await refreshCharacters();
     const ok = await refreshConversations();
     if (!ok) return;
     const firstConv = state.conversations[0] || null;
     if (firstConv) {
       await switchConversation(firstConv.id);
     } else {
-      state.currentConversationId = null;
-      state.messages = [];
+      const defChar = getActiveCharacter();
+      if (defChar && defChar.first_message) {
+        await startNewChatWithCharacter(defChar.id, false);
+      } else {
+        state.currentConversationId = null;
+        state.messages = [];
+      }
     }
+    updateWelcomeHero();
     showAppView();
   }
 
   async function bootstrap() {
     initTheme();
+    initBackground();
 
     try {
       const healthRes = await fetch("/api/health");
@@ -1192,89 +1618,633 @@
       "你是一位极简高效的日常百科助手。直接给核心结论与要点，不寒暄不铺垫，复杂问题分点说清。",
   };
 
-  function updateUserPersonaStatus(isCustom) {
-    userPersonaStatus.textContent = isCustom
-      ? "当前生效：我的自定义人设（仅自己账号生效）"
-      : "当前生效：沿用管理员设定的人设";
+  // --------------------------------------------------------------------------
+  // 角色系统（列表 / 切换 / 编辑 / 新建 / 删除）
+  // --------------------------------------------------------------------------
+
+  function showCharListView() {
+    charEditorMsg.classList.add("hidden");
+    charEditorView.classList.add("hidden");
+    charListView.classList.remove("hidden");
   }
 
-  async function openUserPersonaModal() {
-    if (state.isStreaming) return;
-    userPersonaMsg.classList.add("hidden");
-    personaModal.classList.remove("hidden");
-    try {
-      const res = await fetch("/api/persona");
-      if (res.status === 401) {
-        state.user = null;
-        showAuthView();
-        return;
-      }
-      if (!res.ok) {
-        showAdminMsg(userPersonaMsg, "读取个人人设失败。", false);
-        return;
-      }
-      const data = await res.json();
-      userPersonaInput.value = data.custom_persona || "";
-      updateUserPersonaStatus(Boolean(data.is_custom));
-      userPersonaInput.focus();
-    } catch (_) {
-      showAdminMsg(userPersonaMsg, "读取个人人设时网络异常。", false);
+  function showCharEditorView(charObj) {
+    charListMsg.classList.add("hidden");
+    charEditorMsg.classList.add("hidden");
+    state.editingCharacterId = charObj ? charObj.id : null;
+    charAvatarInput.value = (charObj && charObj.avatar) || "✨";
+    charNameInput.value = (charObj && charObj.name) || "";
+    charPersonalityInput.value = (charObj && charObj.personality) || "";
+    charCatchphraseInput.value = (charObj && charObj.catchphrase) || "";
+    charBackgroundInput.value = (charObj && charObj.background) || "";
+    charExamplesInput.value = (charObj && charObj.examples) || "";
+    charFirstMsgInput.value = (charObj && charObj.first_message) || "";
+    charDefaultCheck.checked = Boolean(charObj && charObj.is_default);
+    charListView.classList.add("hidden");
+    charEditorView.classList.remove("hidden");
+    charNameInput.focus();
+  }
+
+  function renderCharacterList() {
+    charListGrid.innerHTML = "";
+    const activeChar = getActiveCharacter();
+    userPersonaStatus.textContent = activeChar
+      ? "当前对话角色：" + activeChar.avatar + " " + activeChar.name
+      : "支持多角色切换、开场白冷启动与自定义编辑";
+
+    if (!state.characters.length) {
+      const empty = document.createElement("div");
+      empty.className = "conv-empty";
+      empty.textContent = "暂无角色，点击右上角「＋ 新建角色」创建一个吧！";
+      charListGrid.appendChild(empty);
+      return;
     }
-  }
 
-  async function saveUserPersona(promptText, successTip) {
-    userPersonaSaveBtn.disabled = true;
-    userPersonaClearBtn.disabled = true;
-    try {
-      const res = await fetch("/api/persona", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ system_prompt: promptText }),
+    state.characters.forEach(function (ch) {
+      const isCurrent = activeChar && activeChar.id === ch.id;
+      const card = document.createElement("div");
+      card.className = "char-card" + (isCurrent ? " active" : "");
+
+      const head = document.createElement("div");
+      head.className = "char-card-head";
+
+      const ident = document.createElement("div");
+      ident.className = "char-card-ident";
+      const av = document.createElement("span");
+      av.className = "char-card-avatar";
+      av.textContent = ch.avatar || "✦";
+      const nameWrap = document.createElement("div");
+      const nameEl = document.createElement("div");
+      nameEl.className = "char-card-name";
+      nameEl.textContent =
+        ch.name + (ch.is_default ? " · 默认" : "") + (isCurrent ? " · 当前" : "");
+      nameWrap.appendChild(nameEl);
+      ident.appendChild(av);
+      ident.appendChild(nameWrap);
+      head.appendChild(ident);
+
+      const desc = document.createElement("div");
+      desc.className = "char-card-desc";
+      desc.textContent = ch.personality || ch.background || "未填写性格简介";
+
+      const actions = document.createElement("div");
+      actions.className = "char-card-actions";
+
+      const chatNowBtn = document.createElement("button");
+      chatNowBtn.type = "button";
+      chatNowBtn.className = "glass-action-btn";
+      chatNowBtn.textContent = "💬 用它新开对话";
+      chatNowBtn.addEventListener("click", async function () {
+        personaModal.classList.add("hidden");
+        await startNewChatWithCharacter(ch.id, true);
       });
-      const data = await res.json();
-      if (!res.ok) {
-        showAdminMsg(userPersonaMsg, data.detail || "保存失败。", false);
-        return;
+      actions.appendChild(chatNowBtn);
+
+      if (!ch.is_default) {
+        const defBtn = document.createElement("button");
+        defBtn.type = "button";
+        defBtn.className = "glass-action-btn";
+        defBtn.textContent = "设为默认";
+        defBtn.addEventListener("click", async function () {
+          const res = await fetch("/api/characters", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: ch.id, is_default: true }),
+          });
+          if (res.ok) {
+            await refreshCharacters();
+            renderCharacterList();
+            showAdminMsg(charListMsg, "已将「" + ch.name + "」设为默认角色。", true);
+          }
+        });
+        actions.appendChild(defBtn);
       }
-      userPersonaInput.value = data.custom_persona || "";
-      updateUserPersonaStatus(Boolean(data.is_custom));
-      showAdminMsg(userPersonaMsg, successTip, true);
-    } catch (_) {
-      showAdminMsg(userPersonaMsg, "保存失败，请检查网络。", false);
-    } finally {
-      userPersonaSaveBtn.disabled = false;
-      userPersonaClearBtn.disabled = false;
-    }
+
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "glass-action-btn";
+      editBtn.textContent = "✎ 编辑";
+      editBtn.addEventListener("click", function () {
+        showCharEditorView(ch);
+      });
+      actions.appendChild(editBtn);
+
+      if (state.characters.length > 1) {
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "glass-action-btn";
+        delBtn.textContent = "删除";
+        delBtn.addEventListener("click", async function () {
+          const res = await fetch("/api/characters?id=" + encodeURIComponent(ch.id), {
+            method: "DELETE",
+          });
+          const data = await res.json().catch(function () { return {}; });
+          if (!res.ok) {
+            showAdminMsg(charListMsg, data.detail || "删除角色失败。", false);
+            return;
+          }
+          await refreshCharacters();
+          renderCharacterList();
+          renderMessages();
+          showAdminMsg(charListMsg, "已删除角色「" + ch.name + "」。", true);
+        });
+        actions.appendChild(delBtn);
+      }
+
+      card.appendChild(head);
+      card.appendChild(desc);
+      card.appendChild(actions);
+      charListGrid.appendChild(card);
+    });
   }
 
-  personaBtn.addEventListener("click", openUserPersonaModal);
+  async function openCharactersModal() {
+    if (state.isStreaming) return;
+    charListMsg.classList.add("hidden");
+    showCharListView();
+    personaModal.classList.remove("hidden");
+    const ok = await refreshCharacters();
+    if (!ok) {
+      showAdminMsg(charListMsg, "读取角色列表失败，请重试。", false);
+      return;
+    }
+    renderCharacterList();
+  }
+
+  personaBtn.addEventListener("click", openCharactersModal);
   userPersonaCloseBtn.addEventListener("click", function () {
     personaModal.classList.add("hidden");
   });
   personaModal.addEventListener("click", function (evt) {
     if (evt.target === personaModal) personaModal.classList.add("hidden");
   });
+  charCreateBtn.addEventListener("click", function () {
+    showCharEditorView(null);
+  });
+  charCancelEditBtn.addEventListener("click", function () {
+    showCharListView();
+    renderCharacterList();
+  });
 
-  userPersonaChips.forEach(function (chip) {
-    chip.addEventListener("click", function () {
-      const key = chip.dataset.persona;
-      if (PERSONA_TEMPLATES[key]) {
-        userPersonaInput.value = PERSONA_TEMPLATES[key];
-        userPersonaInput.focus();
+  charEditorView.addEventListener("submit", async function (evt) {
+    evt.preventDefault();
+    charSaveBtn.disabled = true;
+    charEditorMsg.classList.add("hidden");
+    const payload = {
+      avatar: charAvatarInput.value.trim() || "✦",
+      name: charNameInput.value.trim(),
+      personality: charPersonalityInput.value.trim(),
+      catchphrase: charCatchphraseInput.value.trim(),
+      background: charBackgroundInput.value.trim(),
+      examples: charExamplesInput.value.trim(),
+      first_message: charFirstMsgInput.value.trim(),
+      is_default: charDefaultCheck.checked,
+    };
+    const isEdit = Boolean(state.editingCharacterId);
+    if (isEdit) payload.id = state.editingCharacterId;
+
+    try {
+      const res = await fetch("/api/characters", {
+        method: isEdit ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok) {
+        showAdminMsg(charEditorMsg, data.detail || "保存角色失败。", false);
+        return;
       }
+      await refreshCharacters();
+      showCharListView();
+      renderCharacterList();
+      renderMessages();
+      showAdminMsg(charListMsg, "角色「" + payload.name + "」已保存！", true);
+    } catch (_) {
+      showAdminMsg(charEditorMsg, "保存角色时网络异常。", false);
+    } finally {
+      charSaveBtn.disabled = false;
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // 长期记忆本（查看 / 筛选 / 增删改 / 手动与自动提炼）
+  // --------------------------------------------------------------------------
+
+  function getCharNameById(charId) {
+    if (!charId) return "通用记忆";
+    const found = state.characters.find(function (c) { return c.id === charId; });
+    return found ? found.avatar + " " + found.name : "角色专属";
+  }
+
+  function renderMemoriesList() {
+    memList.innerHTML = "";
+    const activeChar = getActiveCharacter();
+    const activeCharId = activeChar ? activeChar.id : "";
+
+    const filtered = state.memories.filter(function (m) {
+      if (state.memoryFilter === "global") return !m.character_id;
+      if (state.memoryFilter === "character") {
+        return activeCharId && m.character_id === activeCharId;
+      }
+      return true;
+    });
+
+    if (!filtered.length) {
+      const empty = document.createElement("div");
+      empty.className = "conv-empty";
+      empty.textContent = "还没有记忆条目，可以在上方手动添加，或从当前对话自动提炼！";
+      memList.appendChild(empty);
+      return;
+    }
+
+    filtered.forEach(function (mem) {
+      const card = document.createElement("div");
+      card.className = "mem-item" + (mem.enabled ? "" : " disabled");
+
+      const top = document.createElement("div");
+      top.className = "mem-item-top";
+
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.checked = Boolean(mem.enabled);
+      check.title = mem.enabled ? "已启用（点击暂停注入）" : "已暂停（点击重新启用）";
+      check.addEventListener("change", async function () {
+        const res = await fetch("/api/memories", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: mem.id, enabled: check.checked }),
+        });
+        if (res.ok) {
+          mem.enabled = check.checked;
+          renderMemoriesList();
+        }
+      });
+
+      const textEl = document.createElement("div");
+      textEl.className = "mem-item-text";
+      textEl.textContent = mem.content;
+
+      top.appendChild(check);
+      top.appendChild(textEl);
+
+      const meta = document.createElement("div");
+      meta.className = "mem-item-meta";
+
+      const badges = document.createElement("div");
+      badges.className = "mem-badges";
+      const scopeBadge = document.createElement("span");
+      scopeBadge.className = "mem-badge";
+      scopeBadge.textContent = getCharNameById(mem.character_id);
+      const srcBadge = document.createElement("span");
+      srcBadge.className = "mem-badge";
+      srcBadge.textContent = mem.source === "auto" ? "AI 提炼" : "手动记录";
+      badges.appendChild(scopeBadge);
+      badges.appendChild(srcBadge);
+
+      const ops = document.createElement("div");
+      ops.className = "char-card-actions";
+
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "glass-action-btn";
+      editBtn.textContent = "✎ 编辑";
+      editBtn.addEventListener("click", function () {
+        if (card.querySelector(".mem-edit-row")) return;
+        const editRow = document.createElement("div");
+        editRow.className = "bg-custom-row mem-edit-row";
+        const inp = document.createElement("input");
+        inp.type = "url";
+        inp.style.flex = "1";
+        inp.value = mem.content;
+        inp.maxLength = 300;
+        const saveB = document.createElement("button");
+        saveB.type = "button";
+        saveB.className = "glass-action-btn";
+        saveB.textContent = "保存";
+        const cancelB = document.createElement("button");
+        cancelB.type = "button";
+        cancelB.className = "glass-action-btn";
+        cancelB.textContent = "取消";
+        cancelB.addEventListener("click", function () {
+          editRow.remove();
+        });
+        saveB.addEventListener("click", async function () {
+          const val = inp.value.trim();
+          if (!val) return;
+          const res = await fetch("/api/memories", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: mem.id, content: val }),
+          });
+          if (res.ok) {
+            mem.content = val;
+            renderMemoriesList();
+          }
+        });
+        editRow.appendChild(inp);
+        editRow.appendChild(saveB);
+        editRow.appendChild(cancelB);
+        card.appendChild(editRow);
+        inp.focus();
+      });
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "glass-action-btn";
+      delBtn.textContent = "× 删除";
+      delBtn.addEventListener("click", async function () {
+        const res = await fetch("/api/memories?id=" + encodeURIComponent(mem.id), {
+          method: "DELETE",
+        });
+        if (res.ok) {
+          state.memories = state.memories.filter(function (x) { return x.id !== mem.id; });
+          renderMemoriesList();
+        }
+      });
+
+      ops.appendChild(editBtn);
+      ops.appendChild(delBtn);
+      meta.appendChild(badges);
+      meta.appendChild(ops);
+
+      card.appendChild(top);
+      card.appendChild(meta);
+      memList.appendChild(card);
+    });
+  }
+
+  async function loadMemories() {
+    const res = await fetch("/api/memories");
+    if (res.status === 401) {
+      state.user = null;
+      showAuthView();
+      return false;
+    }
+    if (!res.ok) return false;
+    const data = await res.json();
+    state.memories = Array.isArray(data.memories) ? data.memories : [];
+    renderMemoriesList();
+    return true;
+  }
+
+  async function maybeTriggerAutoMemoryExtract() {
+    let enabled = false;
+    try {
+      enabled = localStorage.getItem(AUTO_EXTRACT_KEY) === "1";
+    } catch (_) {}
+    if (!enabled || !state.currentConversationId) return;
+    state.userTurnCounter += 1;
+    if (state.userTurnCounter % 6 !== 0) return;
+
+    const activeChar = getActiveCharacter();
+    try {
+      await fetch("/api/memories/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: state.currentConversationId,
+          character_id: activeChar ? activeChar.id : "",
+        }),
+      });
+    } catch (_) {}
+  }
+
+  memoriesBtn.addEventListener("click", async function () {
+    if (state.isStreaming) return;
+    memMsg.classList.add("hidden");
+    try {
+      memAutoExtractCheck.checked = localStorage.getItem(AUTO_EXTRACT_KEY) === "1";
+    } catch (_) {}
+    memoriesModal.classList.remove("hidden");
+    const ok = await loadMemories();
+    if (!ok) {
+      showAdminMsg(memMsg, "读取记忆本失败，请稍后重试。", false);
+    }
+  });
+
+  memoriesCloseBtn.addEventListener("click", function () {
+    memoriesModal.classList.add("hidden");
+  });
+  memoriesModal.addEventListener("click", function (evt) {
+    if (evt.target === memoriesModal) memoriesModal.classList.add("hidden");
+  });
+
+  memFilterBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      state.memoryFilter = btn.dataset.filter || "all";
+      memFilterBtns.forEach(function (b) {
+        b.classList.toggle("active", b.dataset.filter === state.memoryFilter);
+      });
+      renderMemoriesList();
     });
   });
 
-  userPersonaClearBtn.addEventListener("click", function () {
-    saveUserPersona("", "已清除自定义人设，接下来将使用管理员设定的人设！");
+  memAutoExtractCheck.addEventListener("change", function () {
+    try {
+      localStorage.setItem(AUTO_EXTRACT_KEY, memAutoExtractCheck.checked ? "1" : "0");
+    } catch (_) {}
   });
 
-  userPersonaSaveBtn.addEventListener("click", function () {
-    const val = userPersonaInput.value.trim();
-    const tip = val
-      ? "你的人设已保存，下一条消息立即生效！"
-      : "已清空自定义人设，接下来将使用管理员设定的人设！";
-    saveUserPersona(val, tip);
+  memAddForm.addEventListener("submit", async function (evt) {
+    evt.preventDefault();
+    const content = memNewInput.value.trim();
+    if (!content) return;
+    const activeChar = getActiveCharacter();
+    const scopeId =
+      memScopeSelect.value === "__current__" && activeChar ? activeChar.id : "";
+    try {
+      const res = await fetch("/api/memories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: content, character_id: scopeId }),
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok) {
+        showAdminMsg(memMsg, data.detail || "添加记忆失败。", false);
+        return;
+      }
+      memNewInput.value = "";
+      if (data.memory) {
+        state.memories.unshift(data.memory);
+        renderMemoriesList();
+      }
+      showAdminMsg(memMsg, "已记入长期记忆本！", true);
+    } catch (_) {
+      showAdminMsg(memMsg, "添加记忆时网络异常。", false);
+    }
+  });
+
+  memExtractBtn.addEventListener("click", async function () {
+    if (!state.currentConversationId) {
+      showAdminMsg(memMsg, "请先进行一段对话后再提炼记忆。", false);
+      return;
+    }
+    memExtractBtn.disabled = true;
+    showAdminMsg(memMsg, "正在分析当前对话，提炼长期记忆要点...", true);
+    const activeChar = getActiveCharacter();
+    try {
+      const res = await fetch("/api/memories/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: state.currentConversationId,
+          character_id: activeChar ? activeChar.id : "",
+        }),
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok) {
+        showAdminMsg(memMsg, data.detail || "记忆提炼失败。", false);
+        return;
+      }
+      if (Array.isArray(data.memories)) {
+        state.memories = data.memories;
+        renderMemoriesList();
+      }
+      showAdminMsg(memMsg, data.detail || "记忆提炼完成。", true);
+    } catch (_) {
+      showAdminMsg(memMsg, "提炼记忆时网络异常。", false);
+    } finally {
+      memExtractBtn.disabled = false;
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // 氛围感聊天背景切换（预设光晕 + 自定义壁纸 + 遮罩强度）
+  // --------------------------------------------------------------------------
+
+  const BG_PRESETS = [
+    {
+      id: "starlight",
+      label: "星芒深空",
+      css: "radial-gradient(58% 46% at 14% 6%, rgba(99, 102, 241, 0.24) 0%, transparent 70%), radial-gradient(52% 44% at 88% 90%, rgba(56, 189, 248, 0.20) 0%, transparent 72%)",
+    },
+    {
+      id: "rainy",
+      label: "深夜雨窗",
+      css: "radial-gradient(62% 52% at 22% 14%, rgba(59, 130, 246, 0.22) 0%, transparent 72%), radial-gradient(54% 48% at 80% 82%, rgba(14, 165, 233, 0.16) 0%, transparent 74%)",
+    },
+    {
+      id: "sakura",
+      label: "樱落霓虹",
+      css: "radial-gradient(60% 48% at 18% 12%, rgba(244, 114, 182, 0.20) 0%, transparent 70%), radial-gradient(56% 48% at 86% 85%, rgba(168, 85, 247, 0.20) 0%, transparent 72%)",
+    },
+    {
+      id: "forest",
+      label: "森林微光",
+      css: "radial-gradient(58% 48% at 20% 10%, rgba(16, 185, 129, 0.18) 0%, transparent 70%), radial-gradient(52% 44% at 85% 88%, rgba(20, 184, 166, 0.16) 0%, transparent 72%)",
+    },
+    {
+      id: "pure",
+      label: "极简纯夜",
+      css: "none",
+    },
+  ];
+
+  function loadBgConfig() {
+    try {
+      const raw = localStorage.getItem(BG_STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (_) {}
+    return { preset: "starlight", customUrl: "", dim: 56 };
+  }
+
+  function saveAndApplyBgConfig(cfg) {
+    try {
+      localStorage.setItem(BG_STORAGE_KEY, JSON.stringify(cfg));
+    } catch (_) {}
+
+    if (cfg.customUrl) {
+      ambientBgEl.style.backgroundImage = 'url("' + cfg.customUrl.replace(/"/g, "") + '")';
+      ambientBgEl.style.setProperty("--bg-dim", String((Number(cfg.dim || 56) / 100).toFixed(2)));
+    } else {
+      const p =
+        BG_PRESETS.find(function (x) { return x.id === cfg.preset; }) || BG_PRESETS[0];
+      ambientBgEl.style.backgroundImage = p.css === "none" ? "none" : p.css;
+      ambientBgEl.style.setProperty("--bg-dim", "0");
+    }
+    renderBgPresets(cfg);
+  }
+
+  function renderBgPresets(cfg) {
+    if (!bgPresetGrid) return;
+    const current = cfg || loadBgConfig();
+    bgPresetGrid.innerHTML = "";
+    BG_PRESETS.forEach(function (preset) {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className =
+        "bg-preset-card" + (!current.customUrl && current.preset === preset.id ? " active" : "");
+      const swatch = document.createElement("div");
+      swatch.className = "bg-swatch";
+      swatch.style.backgroundColor = "var(--bg-base)";
+      if (preset.css !== "none") swatch.style.backgroundImage = preset.css;
+      const label = document.createElement("span");
+      label.textContent = preset.label;
+      label.style.fontSize = "0.8rem";
+      card.appendChild(swatch);
+      card.appendChild(label);
+      card.addEventListener("click", function () {
+        const next = loadBgConfig();
+        next.preset = preset.id;
+        next.customUrl = "";
+        bgUrlInput.value = "";
+        saveAndApplyBgConfig(next);
+      });
+      bgPresetGrid.appendChild(card);
+    });
+  }
+
+  function initBackground() {
+    const cfg = loadBgConfig();
+    bgDimRange.value = String(cfg.dim || 56);
+    bgUrlInput.value = cfg.customUrl && !cfg.customUrl.startsWith("data:") ? cfg.customUrl : "";
+    saveAndApplyBgConfig(cfg);
+  }
+
+  bgBtn.addEventListener("click", function () {
+    const cfg = loadBgConfig();
+    bgDimRange.value = String(cfg.dim || 56);
+    renderBgPresets(cfg);
+    bgModal.classList.remove("hidden");
+  });
+  bgCloseBtn.addEventListener("click", function () {
+    bgModal.classList.add("hidden");
+  });
+  bgModal.addEventListener("click", function (evt) {
+    if (evt.target === bgModal) bgModal.classList.add("hidden");
+  });
+  bgUrlInput.addEventListener("change", function () {
+    const val = bgUrlInput.value.trim();
+    if (val && !/^https?:\/\//i.test(val)) return;
+    const cfg = loadBgConfig();
+    cfg.customUrl = val;
+    saveAndApplyBgConfig(cfg);
+  });
+  bgUploadBtn.addEventListener("click", function () {
+    bgFileInput.click();
+  });
+  bgFileInput.addEventListener("change", async function () {
+    const file = bgFileInput.files && bgFileInput.files[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressImageToDataUrl(file);
+      const cfg = loadBgConfig();
+      cfg.customUrl = dataUrl;
+      bgUrlInput.value = "";
+      saveAndApplyBgConfig(cfg);
+    } catch (_) {}
+  });
+  bgClearCustomBtn.addEventListener("click", function () {
+    const cfg = loadBgConfig();
+    cfg.customUrl = "";
+    bgUrlInput.value = "";
+    bgFileInput.value = "";
+    saveAndApplyBgConfig(cfg);
+  });
+  bgDimRange.addEventListener("input", function () {
+    const cfg = loadBgConfig();
+    cfg.dim = Number(bgDimRange.value || 56);
+    saveAndApplyBgConfig(cfg);
   });
 
   themeToggleBtn.addEventListener("click", function () {
@@ -1284,27 +2254,39 @@
 
   clearBtn.addEventListener("click", function () {
     if (state.isStreaming || !state.messages.length) return;
-    confirmModal.classList.remove("hidden");
+    openConfirmDialog({
+      title: "清空当前对话？",
+      desc: "这会永久删除当前这一条对话里的云端聊天记录与图片，且无法恢复。",
+      okText: "确认清空",
+      onConfirm: async function () {
+        try {
+          const url = state.currentConversationId
+            ? "/api/messages?conversation_id=" + encodeURIComponent(state.currentConversationId)
+            : "/api/messages";
+          const res = await fetch(url, { method: "DELETE" });
+          if (res.ok) {
+            state.messages = [];
+            setChatError(null);
+            renderMessages();
+            await refreshConversations();
+          }
+        } catch (_) {}
+      },
+    });
   });
 
   confirmCancelBtn.addEventListener("click", function () {
+    pendingConfirmHandler = null;
     confirmModal.classList.add("hidden");
   });
 
   confirmOkBtn.addEventListener("click", async function () {
     confirmModal.classList.add("hidden");
-    try {
-      const url = state.currentConversationId
-        ? "/api/messages?conversation_id=" + encodeURIComponent(state.currentConversationId)
-        : "/api/messages";
-      const res = await fetch(url, { method: "DELETE" });
-      if (res.ok) {
-        state.messages = [];
-        setChatError(null);
-        renderMessages();
-        await refreshConversations();
-      }
-    } catch (_) {}
+    const handler = pendingConfirmHandler;
+    pendingConfirmHandler = null;
+    if (handler) {
+      await handler();
+    }
   });
 
   adminBtn.addEventListener("click", openAdminModal);
@@ -1465,6 +2447,10 @@
     state.conversations = [];
     state.currentConversationId = null;
     state.messages = [];
+    state.characters = [];
+    state.activeCharacterId = null;
+    state.memories = [];
+    state.userTurnCounter = 0;
     clearSelectedImage();
     setChatError(null);
     showAuthView();

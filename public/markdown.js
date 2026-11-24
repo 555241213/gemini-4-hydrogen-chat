@@ -32,19 +32,28 @@
 
     text = escapeHtml(text);
 
-    // 链接 [text](https://...)
+    // 链接 [text](https://...) 先提取占位，避免后续符号规则破坏标签或 URL
+    const linkTokens = [];
     text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (_, label, url) {
       const safeHref = sanitizeUrl(url);
-      return '<a href="' + safeHref + '" target="_blank" rel="noopener noreferrer">' + label + "</a>";
+      const idx = linkTokens.length;
+      linkTokens.push(
+        '<a href="' + safeHref + '" target="_blank" rel="noopener noreferrer">' + label + "</a>",
+      );
+      return "\u0000LK" + idx + "\u0000";
     });
 
-    // 粗体 / 斜体 / 删除线
+    // 粗体 / 删除线 / 动作描写（*动作* 与 （动作） 渲染为淡灰色斜体）
     text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     text = text.replace(/__([^_]+)__/g, "<strong>$1</strong>");
     text = text.replace(/~~([^~]+)~~/g, "<del>$1</del>");
-    text = text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+    text = text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em class="action-text">$2</em>');
+    text = text.replace(/（([^（）\n]+)）/g, '<em class="action-text">（$1）</em>');
 
-    // 还原行内代码
+    // 还原链接与行内代码
+    text = text.replace(/\u0000LK(\d+)\u0000/g, function (_, idx) {
+      return linkTokens[Number(idx)] || "";
+    });
     text = text.replace(/\u0000IC(\d+)\u0000/g, function (_, idx) {
       return inlineCodes[Number(idx)] || "";
     });
