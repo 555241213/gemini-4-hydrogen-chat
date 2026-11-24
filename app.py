@@ -52,30 +52,6 @@ API_TIMEOUT_SECONDS = 60.0
 API_MAX_RETRIES = 1
 DEFAULT_CONTEXT_TURNS = 6
 
-# 空状态 4 张日常聊天毛玻璃快捷卡片
-QUICK_PROMPTS: list[dict[str, str]] = [
-    {
-        "title": "🍳 今晚吃点什么",
-        "desc": "告诉我冰箱里还有哪些食材，帮你快速搭配几道家常菜",
-        "prompt": "我平时下班不想花太长时间做饭，请推荐 3 道 15 分钟内能搞定、常见食材就能做的快手家常菜，简单写下做法。",
-    },
-    {
-        "title": "✍️ 润色一条消息",
-        "desc": "把想说的话改得更礼貌、自然或高情商，方便直接发给别人",
-        "prompt": "请帮我把这句话润色成更自然礼貌的表达（提供口语友好版和正式得体版各一条）：「不好意思，这件事我这周可能赶不完，得下周初才能给你。」",
-    },
-    {
-        "title": "✈️ 周末轻松出行",
-        "desc": "策划一次不赶时间、适合放松发呆的周末半日或一日游",
-        "prompt": "帮我设计一个轻松不累的周末一日城市漫步计划，包含上午、午饭、下午茶和傍晚安排，重点是节奏慢、氛围好。",
-    },
-    {
-        "title": "💡 讲个有趣知识",
-        "desc": "用大白话聊一个贴近日常、听完会觉得很有意思的冷知识",
-        "prompt": "用通俗有趣的聊天口吻，给我讲一个贴近日常生活的冷知识，不要太学术，3 分钟内能看完。",
-    },
-]
-
 
 # ==============================================================================
 # 配置读取与客户端初始化
@@ -389,47 +365,6 @@ def inject_glass_theme_css(theme_mode: str) -> None:
         font-size: 0.94rem;
         color: var(--text-secondary);
         line-height: 1.6;
-    }}
-
-    [class*="st-key-quick_card_"] button {{
-        width: 100% !important;
-        min-height: 96px !important;
-        height: auto !important;
-        padding: 15px 18px !important;
-        text-align: left !important;
-        justify-content: flex-start !important;
-        align-items: flex-start !important;
-        background: var(--glass-bg) !important;
-        backdrop-filter: blur(16px) !important;
-        -webkit-backdrop-filter: blur(16px) !important;
-        border: 1px solid var(--glass-border) !important;
-        border-radius: 16px !important;
-        box-shadow: var(--shadow-card) !important;
-        color: var(--text-primary) !important;
-        transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease !important;
-    }}
-
-    [class*="st-key-quick_card_"] button:hover:not(:disabled) {{
-        transform: translateY(-2px) !important;
-        background: var(--glass-bg-hover) !important;
-        border-color: var(--glass-border-focus) !important;
-        box-shadow: var(--shadow-soft), 0 0 0 1px rgba(129, 140, 248, 0.22) !important;
-    }}
-
-    [class*="st-key-quick_card_"] button p {{
-        text-align: left !important;
-        line-height: 1.55 !important;
-        white-space: pre-line !important;
-        font-size: 0.88rem !important;
-        color: var(--text-secondary) !important;
-    }}
-
-    [class*="st-key-quick_card_"] button p strong {{
-        display: block !important;
-        font-size: 0.94rem !important;
-        font-weight: 600 !important;
-        color: var(--text-primary) !important;
-        margin-bottom: 4px !important;
     }}
 
     /* ===== 消息排版层级 ===== */
@@ -1282,38 +1217,21 @@ def render_top_navbar() -> None:
 
 
 def render_welcome_state() -> None:
-    """无消息时展示居中欢迎语 + 4 张毛玻璃日常快捷提问卡片。"""
+    """无消息时仅展示简洁居中的欢迎语。"""
     st.markdown(
         """
-        <div class="welcome-hero">
+        <div class="welcome-hero" style="padding-top: 16vh;">
             <div class="welcome-badge">
                 <span class="starburst-icon"></span>
             </div>
             <h1 class="welcome-title">嗨，今天想聊点什么？</h1>
             <p class="welcome-subtitle">
-                日常聊天、查点生活灵感、润色文字，或者直接发张照片让我看看
+                日常聊天、随手提问，或者直接发张照片让我看看
             </p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    is_busy = st.session_state.is_generating
-    for row_start in (0, 2):
-        col_left, col_right = st.columns(2, gap="medium")
-        for offset, col in enumerate((col_left, col_right)):
-            card_idx = row_start + offset
-            card = QUICK_PROMPTS[card_idx]
-            with col:
-                with st.container(key=f"quick_card_{card_idx}"):
-                    label = f"**{card['title']}**\n{card['desc']}"
-                    if st.button(
-                        label,
-                        key=f"quick_btn_{card_idx}",
-                        use_container_width=True,
-                        disabled=is_busy,
-                    ):
-                        submit_user_message(card["prompt"], None)
 
 
 def render_chat_history() -> None:
